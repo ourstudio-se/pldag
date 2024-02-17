@@ -12,6 +12,7 @@ Under the surface, each node is connected to a prime combination number. It is u
 
 # Example
 ```python
+from pldag import PLDAG
 
 model = PLDAG(10) # 10 here is the number of dimensions to represent a prime combination. This effects the possible number of nodes that can exist in the graph but also effects the computation complexity.
 print(model.n_max) # check how many nodes could be contained
