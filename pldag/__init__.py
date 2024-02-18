@@ -1,5 +1,5 @@
 import numpy as np
-from itertools import product, islice
+from itertools import product, islice, chain
 from typing import Dict, List
 
 class PLDAG:
@@ -49,7 +49,11 @@ class PLDAG:
         """How many variables are left to be used"""
         return self.n_max - self._pmat.shape[0]
     
-    def add_primitive(self, alias: str, bound: tuple = (0,1)) -> None:
+    def get(self, aliases: List[str]) -> np.ndarray:
+        """Get the bounds of the given aliases"""
+        return self._dmat[[self._amap[a] for a in aliases]][:,1:]
+    
+    def set_primitive(self, alias: str, bound: tuple = (0,1)) -> None:
         """Add a primitive prime factor matrix"""
         if len(bound) != 2:
             raise ValueError(f"bound must be of size 2")
@@ -62,13 +66,18 @@ class PLDAG:
             self._dmat = np.append(self._dmat, np.array([0, *bound], dtype=np.int64)[None], axis=0)
             self._amap[alias] = len(self._pmat) - 1
 
-    def add_composite(self, alias: str, children: list, bias: int, negate: bool = False) -> None:
+    def set_primitives(self, aliases: List[str], bound: tuple = (0,1)) -> None:
+        """Add multiple primitive prime factor matrices"""
+        for alias in aliases:
+            self.set_primitive(alias, bound)
+
+    def set_composite(self, alias: str, children: list, bias: int, negate: bool = False) -> None:
         """
             Add a composite prime factor matrix.
             If alias already registred, only the prime factor matrix is updated.
         """
-        self.add_primitive(f"{bias}", (bias, bias))
-        composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in children + [f"{bias}"]])
+        self.set_primitive(f"{bias}", (bias, bias))
+        composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in chain(children, [str(bias)])])
         if alias in self._amap:
             self._pmat[self._amap[alias]][1] = composite_prime
         else:
@@ -78,8 +87,16 @@ class PLDAG:
             self._amap[alias] = len(self._pmat) - 1
 
     @staticmethod
-    def _prop_algo(D, P, W, F, M):
-        """A pure numpy implementation of the propagation algorithm"""
+    def _prop_algo(D: np.ndarray, P: np.ndarray, W: np.ndarray, F: np.ndarray, M: np.ndarray):
+        """
+            A pure numpy implementation of the propagation algorithm
+
+            D: Bounds matrix
+            P: Primitive Prime matrix
+            W: Composite Prime matrix
+            F: Flip vector
+            M: Mask vector
+        """
         visited = np.zeros(D.shape[0], dtype=bool)
         while M.any() and not np.array_equal(visited, M):
 
@@ -102,8 +119,22 @@ class PLDAG:
             M = ~M & (np.gcd(np.prod(P[M], axis=0), W) != 1).all(axis=1)
 
         return D
+    
+    def propagate(self) -> np.ndarray:
+        """
+            Propagates the graph and returns the propagated bounds.
+        """
+        D: np.ndarray = self._dmat[:,1:]
+        P: np.ndarray = self._pmat[:,0]
+        W: np.ndarray = self._pmat[:,1]
+        F: np.ndarray = self._dmat.T[0]
 
-    def propagate(self, query: Dict[str, tuple], select: List[str]) -> np.ndarray:
+        # We don't need to propagate leaf nodes
+        msk = (W != P).any(axis=1)
+
+        return self._prop_algo(D, P, W, F, msk)
+
+    def test(self, query: Dict[str, tuple], select: List[str]) -> np.ndarray:
 
         """
             Propagates the graph and returns the selected result.

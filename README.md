@@ -12,35 +12,71 @@ Under the surface, each node is connected to a prime combination number. It is u
 
 # Example
 ```python
+import numpy as np
 from pldag import PLDAG
 
 model = PLDAG(10) # 10 here is the number of dimensions to represent a prime combination. This effects the possible number of nodes that can exist in the graph but also effects the computation complexity.
 print(model.n_max) # check how many nodes could be contained
 print(model.n_left) # check how many are left
 
-model.add_primitive("x")
-model.add_primitive("y")
-model.add_primitive("z")
+# Sets x, y and z as boolean variables in model
+model.set_primitives("xyz")
 
-# Create a simple AND connected to "myand"
-model.add_composite("myand", ["x","y","z"], -3)
+# Create a simple AND connected to "A"
+# This is equivalent to A = x + y + z -3 >= 0
+model.set_composite("and_connector", ["x","y","z"], -3)
 
-# Create a x -> y & z relationship on A
-# First, C = -x >= 0
-# Second, B = y + z >= 2
-# Third connect B and C to A: A = B + C >= 1
-model.add_composite("C", ["x"], 0, True)
-model.add_composite("B", ["y", "z"], -2)
-model.add_composite("A", ["B", "C"], -1)
-print(
-    model.propagate(
+# So if we check when all x, y and z are set to 1, then we
+# expect "and_connector" also to be (1,1)
+assert np.array_equal(
+    model.test({"x": (1,1), "y": (1,1), "z": (1,1)}, ["and_connector"]),
+    np.array([[1,1]]) # We selected "and_connector" and got that one's bounds as result
+)
+
+# Create a (x -> y & z) relationship to A
+# This is equivalent to -x v y & z
+# So first we create the left side of OR (-x), C = -x >= 0
+# Then the right side (y & z), B = y + z >= 2
+# Third we connect B and C to A: A = B + C >= 1
+model.set_composite("C", ["x"], 0, True)
+model.set_composite("B", ["y", "z"], -2)
+model.set_composite("A", ["B", "C"], -1)
+np.array_equal(
+    model.test(
         {
             "x": (1,1), 
             "y": (1,1), 
             "z": (1,1)
         }, 
         select='A'
-    )
+    ),
+    np.array([[1,1]])
 )
-# Returns array([[1,1]]) since A is true.
+# Returns array([[1,1]]) since A is true when x, y and z are true.
+
+np.array_equal(
+    model.test(
+        {
+            "x": (1,1), 
+            "y": (0,0), 
+            "z": (1,1)
+        }, 
+        select='A'
+    ),
+    np.array([[0,0]])
+)
+# Returns array([[0,0]]) since A is false when x is true and y or z are false.
+
+np.array_equal(
+    model.test(
+        {
+            "x": (0,1), 
+            "y": (0,0), 
+            "z": (0,1)
+        }, 
+        select='A'
+    ),
+    np.array([[0,1]])
+)
+# Returns array([[0,1]]) since A is may be true or false.
 ```
