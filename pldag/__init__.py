@@ -79,6 +79,7 @@ class PLDAG:
         for child in children:
             if child not in self._amap:
                 self.set_primitive(child, (0,1))
+        self.set_primitive(f"{bias}", (bias, bias))
         composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in chain(children, [str(bias)])])
         if alias in self._amap:
             self._pmat[self._amap[alias]][1] = composite_prime
@@ -87,7 +88,6 @@ class PLDAG:
             self._pmat = np.append(self._pmat, np.array([new_primitive_prime, composite_prime], dtype=np.uint64)[None], axis=0)
             self._dmat = np.append(self._dmat, np.array([negate * 1, 0, 1], dtype=np.int64)[None], axis=0)
             self._amap[alias] = len(self._pmat) - 1
-        self.set_primitive(f"{bias}", (bias, bias))
 
     @staticmethod
     def _prop_algo(D: np.ndarray, P: np.ndarray, W: np.ndarray, F: np.ndarray, M: np.ndarray):
