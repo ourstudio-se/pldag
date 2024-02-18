@@ -144,7 +144,7 @@ class PLDAG:
 
             Returns the selected propagated bounds.
         """
-        D: np.ndarray = self._dmat[:,1:]
+        D: np.ndarray = self._dmat[:,1:].copy()
         P: np.ndarray = self._pmat[:,0]
         W: np.ndarray = self._pmat[:,1]
         F: np.ndarray = self._dmat.T[0]
