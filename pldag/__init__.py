@@ -49,9 +49,32 @@ class PLDAG:
         """How many variables are left to be used"""
         return self.n_max - self._pmat.shape[0]
     
-    def get(self, aliases: List[str]) -> np.ndarray:
-        """Get the bounds of the given aliases"""
-        return self._dmat[[self._amap[a] for a in aliases]][:,1:]
+    @property
+    def n_used(self) -> int:
+        """How many variables are used"""
+        return self._pmat.shape[0]
+    
+    def get(self, alias: List[str]) -> np.ndarray:
+        """Get the bounds of the given alias"""
+        return self._dmat[self._amap[alias]][1:]
+    
+    def dependencies(self, alias: str) -> List[str]:
+        """Get the dependencies of the given alias"""
+        return list(
+            filter(
+                lambda x: x != alias,
+                map(
+                    lambda x: list(self._amap)[x],
+                    np.argwhere(
+                        (np.mod(self._pmat[self._amap[alias]][1], self._pmat[:,0]) == 0).all(axis=1)
+                    ).T[0]
+                )
+            )
+        )
+    
+    def negated(self, alias: str) -> bool:
+        """Get the negated state of the given alias"""
+        return bool(self._dmat[self._amap[alias]][0])
     
     def set_primitive(self, alias: str, bound: tuple = (0,1)) -> None:
         """Add a primitive prime factor matrix"""

@@ -15,7 +15,8 @@ def test_get():
     model = PLDAG()
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
-    assert np.array_equal(model.get(["x", "y", "z", "A"]), np.array([[0, 1], [0, 1], [0, 1], [0, 1]]))
+    for alias, expected in zip(["x", "y", "z", "A"], np.array([[0, 1], [0, 1], [0, 1], [0, 1]])):
+        assert np.array_equal(model.get(alias), expected)
 
 def test_test():
     model = PLDAG()
@@ -79,3 +80,26 @@ def test_test_second():
         ),
         np.array([[0,1]])
     )
+def test_dependencies():
+    model = PLDAG(10) 
+    model.set_primitives("xyz")
+    model.set_composite("C", ["x"], 0, True)
+    model.set_composite("B", ["y", "z"], -2)
+    model.set_composite("A", ["B", "C"], -1)
+    assert model.dependencies("A") == ["C", "B", "-1"]
+    assert model.dependencies("B") == ["y", "z", "-2"]
+    assert model.dependencies("C") == ["x", "0"]
+    assert model.dependencies("x") == []
+    assert model.dependencies("y") == []
+
+def test_negated():
+    model = PLDAG(10) 
+    model.set_primitives("xyz")
+    model.set_composite("C", ["x"], 0, True)
+    model.set_composite("B", ["y", "z"], -2)
+    model.set_composite("A", ["B", "C"], -1)
+    assert model.negated("A") == False
+    assert model.negated("B") == False
+    assert model.negated("C") == True
+    assert model.negated("x") == False
+    assert model.negated("y") == False
