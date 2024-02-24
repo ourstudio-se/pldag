@@ -10,6 +10,17 @@ def test_propagate():
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
     assert np.array_equal(model.propagate(), np.array([[0, 1], [0, 1], [0, 1], [-1, -1], [0, 1]]))
+    
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_composite("C", "x", 0, True)
+    model.set_composite("B", "xy", -1)
+    model.set_composite("A", "BC", -2)
+    assert np.array_equal(model.propagate(), np.array([[0, 1], [0, 1], [0, 1], [0, 0], [0, 1], [-1, -1], [0, 1], [-2,-2], [0, 1]]))
+    model.set_primitive("x", (1,1))
+    model.propagate()
+    assert np.array_equal(model.get("C"), np.array([0,0]))
+    assert np.array_equal(model.get("A"), np.array([0,0]))
 
 def test_get():
     model = PLDAG()
@@ -96,10 +107,31 @@ def test_negated():
     model = PLDAG(10) 
     model.set_primitives("xyz")
     model.set_composite("C", ["x"], 0, True)
-    model.set_composite("B", ["y", "z"], -2)
-    model.set_composite("A", ["B", "C"], -1)
-    assert model.negated("A") == False
-    assert model.negated("B") == False
+    model.set_composite("B", ["y", "z"], +1, True)
+    model.set_composite("A", list("xyz"), +2, True)
+    assert model.negated("A") == True
+    assert model.negated("B") == True
     assert model.negated("C") == True
     assert model.negated("x") == False
     assert model.negated("y") == False
+
+    assert np.array_equal(model.get("A"), np.array([0,1]))
+    assert np.array_equal(model.get("B"), np.array([0,1]))
+    assert np.array_equal(model.get("C"), np.array([0,1]))
+
+def test_delete():
+    model = PLDAG(3) 
+    model.set_primitives("xyz")
+    model.set_composite("C", ["x"], 0, True)
+    model.set_composite("B", ["y", "z"], +1, True)
+    model.set_composite("A", ["C", "B"], +2, True)
+    model.delete("x")
+    model.propagate()
+    # Since x is removed, C should be able to be true for ever
+    # Same as C = 0 >= 0
+    np.array_equal(model.get("C"), np.array([1,1]))
+    # A and B should stay the same
+    np.array_equal(model.get("B"), np.array([0,1]))
+    np.array_equal(model.get("A"), np.array([1,1]))
+    model.delete("y")
+    model.propagate()

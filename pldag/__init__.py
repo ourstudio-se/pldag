@@ -11,9 +11,9 @@ class PLDAG:
         In summary, this data structure combines elements of a DAG with a logic network, utilizing prime numbers to encode relationships and facilitate operations within the graph.
     """
 
-    PRIME_HEIGHT = 15
+    PRIME_HEIGHT = 17
     PRIMES = np.array([
-        2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+        1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
         31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
         73, 79, 83, 89, 97, 101, 103, 107, 109, 113,
         127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
@@ -37,7 +37,8 @@ class PLDAG:
 
     def _next_prime_combinations(self, start: int, end: int):
         """Get the next prime combinations for the given range of indices"""
-        return np.array(list(islice(product(self.PRIMES[:self.PRIME_HEIGHT], repeat=self.PRIME_WIDTH), start, end)), dtype=np.uint64)
+        # Note we add one to skip the first prime combination of (1, 1, 1, ...)
+        return np.array(list(islice(product(self.PRIMES[:self.PRIME_HEIGHT], repeat=self.PRIME_WIDTH), start+1, end+1)), dtype=np.uint64)
 
     @property
     def n_max(self) -> int:
@@ -76,6 +77,19 @@ class PLDAG:
         """Get the negated state of the given alias"""
         return bool(self._dmat[self._amap[alias]][0])
     
+    def delete(self, alias: str) -> None:
+        """Delete the given alias"""
+        idx = self._amap[alias]
+        primitive_prime = self._pmat[idx][0]
+
+        # Remove the primitive prime for all composite primes
+        for i in np.argwhere((np.mod(self._pmat[:,1], primitive_prime) == 0).all(axis=1)).T[0]:
+            self._pmat[i][1] = np.true_divide(self._pmat[i][1], primitive_prime).astype(np.uint64)
+
+        self._pmat = np.delete(self._pmat, idx, axis=0)
+        self._dmat = np.delete(self._dmat, idx, axis=0)
+        self._amap = {k: v - 1 if v > idx else v for k, v in self._amap.items() if k != alias}
+    
     def set_primitive(self, alias: str, bound: tuple = (0,1)) -> None:
         """Add a primitive prime factor matrix"""
         if len(bound) != 2:
@@ -106,6 +120,7 @@ class PLDAG:
         composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in chain(children, [str(bias)])])
         if alias in self._amap:
             self._pmat[self._amap[alias]][1] = composite_prime
+            self._dmat[self._amap[alias]] = np.array([negate * 1, 0, 1], dtype=np.int64)[None]
         else:
             new_primitive_prime = self._next_prime_combinations(self._pmat.shape[0], self._pmat.shape[0] + 1)[0]
             self._pmat = np.append(self._pmat, np.array([new_primitive_prime, composite_prime], dtype=np.uint64)[None], axis=0)
@@ -123,6 +138,7 @@ class PLDAG:
             F: Flip vector
             M: Mask vector
         """
+        leafs = (P == W).all(axis=1)
         visited = np.zeros(D.shape[0], dtype=bool)
         while M.any() and not np.array_equal(visited, M):
 
@@ -141,8 +157,9 @@ class PLDAG:
             # By the end we do a product with 1 to turn the boolean into integers.
             D[M] = (((child_bounds - child_bounds.sum(axis=0) * F[M][:,None]).sum(axis=2) >= 0) * 1).T
 
-            # Query step finding new nodes to explore
-            M = ~M & (np.gcd(np.prod(P[M], axis=0), W) != 1).all(axis=1)
+            # Query step finding new nodes to explore. Since prime numbers are composites
+            # of themselves we need to exclude them from the query.
+            M = ~leafs & (np.mod(W[:,None], P[M]) == 0).all(axis=2).any(axis=1)
 
         return D
     
@@ -155,8 +172,12 @@ class PLDAG:
         W: np.ndarray = self._pmat[:,1]
         F: np.ndarray = self._dmat.T[0]
 
-        # We don't need to propagate leaf nodes
-        msk = (W != P).any(axis=1)
+        # Find first node level to start propagating from
+        # Is done by first finding leafs..
+        _msk = (W == P).all(axis=1)
+
+        # ..and then finding the nodes connected to the leafs
+        msk = ~_msk & (np.mod(W[:,None], P[_msk]) == 0).all(axis=2).any(axis=1)
 
         return self._prop_algo(D, P, W, F, msk)
 
@@ -182,11 +203,8 @@ class PLDAG:
         # Replace the observed bounds
         D[qprimes] = np.array(list(query.values()), dtype=np.int64)
 
-        # Get the product of all primes
-        product_prime = np.prod(P[qprimes], axis=0, dtype=np.uint64)
-
         # One step forward before starting the loop
         # We don't need to propagate leaf nodes
-        msk = ~qprimes & (np.gcd(product_prime, W) != 1).all(axis=1)
+        msk = ~qprimes & (np.mod(W[:,None], P[qprimes]) == 0).all(axis=2).any(axis=1)
 
         return self._prop_algo(D, P, W, F, msk)[[self._amap[s] for s in select]]
