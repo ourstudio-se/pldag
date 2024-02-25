@@ -120,7 +120,7 @@ class PLDAG:
         composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in chain(children, [str(bias)])])
         if alias in self._amap:
             self._pmat[self._amap[alias]][1] = composite_prime
-            self._dmat = np.append(self._dmat, np.array([negate * 1, 0, 1], dtype=np.uint64)[None], axis=0)
+            self._dmat[self._amap[alias]] = np.array([negate * 1, 0, 1], dtype=np.uint64)
         else:
             new_primitive_prime = self._next_prime_combinations(self._pmat.shape[0], self._pmat.shape[0] + 1)[0]
             self._pmat = np.append(self._pmat, np.array([new_primitive_prime, composite_prime], dtype=np.uint64)[None], axis=0)

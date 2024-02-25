@@ -10,6 +10,22 @@ def test_propagate():
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
     assert np.array_equal(model.propagate(), np.array([[0, 1], [0, 1], [0, 1], [-1, -1], [0, 1]]))
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_composite("C", "x", -1)
+    model.set_composite("B", "yz", -1, True)
+    model.set_composite("A", "BC", -2)
+    model.propagate()
+    assert np.array_equal(model.get("C"), np.array([0, 1]))
+    assert np.array_equal(model.get("B"), np.array([0, 1]))
+    assert np.array_equal(model.get("A"), np.array([0, 1]))
+    model.set_primitive("x", (1,1))
+    model.set_primitive("y", (0,0))
+    model.propagate()
+    assert np.array_equal(model.get("C"), np.array([1,1]))
+    assert np.array_equal(model.get("B"), np.array([1,1]))
+    assert np.array_equal(model.get("A"), np.array([1,1]))
     
     model = PLDAG()
     model.set_primitives("xyz")
@@ -21,6 +37,16 @@ def test_propagate():
     model.propagate()
     assert np.array_equal(model.get("C"), np.array([0,0]))
     assert np.array_equal(model.get("A"), np.array([0,0]))
+
+def test_replace_composite():
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_composite("A", "xyz", -1)
+    model.propagate()
+    assert np.array_equal(model.get("A"), np.array([0, 1]))
+    model.set_composite("A", "xyz", 0)
+    model.propagate()
+    assert np.array_equal(model.get("A"), np.array([1, 1]))
 
 def test_get():
     model = PLDAG()
