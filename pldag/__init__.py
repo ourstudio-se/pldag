@@ -30,8 +30,8 @@ class PLDAG:
         self.PRIME_WIDTH = prime_width
         # Prime combination matrix (primitive prime combination, composite prime combination)
         self._pmat = np.empty((0, 2, self.PRIME_WIDTH), dtype=np.uint64)
-        # Flip bool and bound matrix (flip, lower, upper)
-        self._dmat = np.empty((0, 3),                   dtype=np.int64)
+        # Flip bool and bound matrix (flip, complex bound)
+        self._dmat = np.empty((0, 2),                   dtype=np.complex128)
         # Maps alias to prime index
         self._amap = {}
 
@@ -55,9 +55,14 @@ class PLDAG:
         """How many variables are used"""
         return self._pmat.shape[0]
     
-    def get(self, alias: List[str]) -> np.ndarray:
+    @property
+    def bounds(self) -> np.ndarray:
+        """Get the bounds of all aliases"""
+        return self._dmat.T[1]
+    
+    def get(self, *alias: str) -> np.ndarray:
         """Get the bounds of the given alias"""
-        return self._dmat[self._amap[alias]][1:]
+        return self._dmat[[self._amap[a] for a in alias]].T[1]
     
     def dependencies(self, alias: str) -> List[str]:
         """Get the dependencies of the given alias"""
@@ -90,20 +95,17 @@ class PLDAG:
         self._dmat = np.delete(self._dmat, idx, axis=0)
         self._amap = {k: v - 1 if v > idx else v for k, v in self._amap.items() if k != alias}
     
-    def set_primitive(self, alias: str, bound: tuple = (0,1)) -> None:
+    def set_primitive(self, alias: str, bound: complex = complex(0,1)) -> None:
         """Add a primitive prime factor matrix"""
-        if len(bound) != 2:
-            raise ValueError(f"bound must be of size 2")
-        
         if alias in self._amap:
-            self._dmat[self._amap[alias]][1:] = bound
+            self._dmat[self._amap[alias]][1] = bound
         else:
             new_primitive_prime = self._next_prime_combinations(self._pmat.shape[0], self._pmat.shape[0] + 1)[0]
             self._pmat = np.append(self._pmat, np.array([new_primitive_prime, new_primitive_prime], dtype=np.uint64)[None], axis=0)
-            self._dmat = np.append(self._dmat, np.array([0, *bound], dtype=np.int64)[None], axis=0)
+            self._dmat = np.append(self._dmat, np.array([0, bound])[None], axis=0)
             self._amap[alias] = len(self._pmat) - 1
 
-    def set_primitives(self, aliases: List[str], bound: tuple = (0,1)) -> None:
+    def set_primitives(self, aliases: List[str], bound: complex = complex(0,1)) -> None:
         """Add multiple primitive prime factor matrices"""
         for alias in aliases:
             self.set_primitive(alias, bound)
@@ -116,84 +118,73 @@ class PLDAG:
         for child in children:
             if child not in self._amap:
                 self.set_primitive(child, (0,1))
-        self.set_primitive(f"{bias}", (bias, bias))
+        self.set_primitive(f"{bias}", complex(bias, bias))
         composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in chain(children, [str(bias)])])
         if alias in self._amap:
             self._pmat[self._amap[alias]][1] = composite_prime
-            self._dmat[self._amap[alias]] = np.array([negate * 1, 0, 1], dtype=np.uint64)
+            self._dmat[self._amap[alias]] = np.array([negate * 1, complex(0, 1)])
         else:
             new_primitive_prime = self._next_prime_combinations(self._pmat.shape[0], self._pmat.shape[0] + 1)[0]
             self._pmat = np.append(self._pmat, np.array([new_primitive_prime, composite_prime], dtype=np.uint64)[None], axis=0)
             self._amap[alias] = len(self._pmat) - 1
-            self._dmat = np.append(self._dmat, np.array([negate * 1, 0, 1], dtype=np.uint64)[None], axis=0)
+            self._dmat = np.append(self._dmat, np.array([negate * 1, complex(0, 1)])[None], axis=0)
 
     @staticmethod
     def _prop_algo(D: np.ndarray, P: np.ndarray, W: np.ndarray, F: np.ndarray, M: np.ndarray):
+
         """
-            A pure numpy implementation of the propagation algorithm
+            Propagation algorithm.
 
-            D: Bounds matrix
-            P: Primitive Prime matrix
-            W: Composite Prime matrix
-            F: Flip vector
-            M: Mask vector
+            D: complex bounds matrix
+            P: primitive prime combination matrix
+            W: composite prime combination matrix
+            F: flip bool matrix
+            M: mask for which nodes to start propagate from
+
+            Returns the propagated bounds.
         """
-        leafs = (P == W).all(axis=1)
-        visited = np.zeros(D.shape[0], dtype=bool)
-        while M.any() and not np.array_equal(visited, M):
 
-            # We need to keep track of visited nodes to avoid infinite loops
-            visited = M.copy()
-            
-            # We retreive all child bounds by checking which prime numbers are
-            # factors of the composite prime numbers. We use the modulo operator.
-            # Since the primes are really a combination of prime numbers we need to
-            # check that all dimensions are factors of the composite prime number.
-            child_bounds = (D[:,None].T * (np.mod(W[M][:, None], P) == 0).all(axis=2))
-            
-            # Flip those that should be flipped (meaning negated is true). Before we sum all
-            # child bounds we flip them so e.g. (0,1) becomes (-1,0). And then
-            # propagating by checking if the sum of all bounds is greater or equal to zero. 
-            # By the end we do a product with 1 to turn the boolean into integers.
-            D[M] = (((child_bounds - child_bounds.sum(axis=0) * F[M][:,None]).sum(axis=2) >= 0) * 1).T
-
-            # Query step finding new nodes to explore. Since prime numbers are composites
-            # of themselves we need to exclude them from the query.
-            M = ~leafs & (np.mod(W[:,None], P[M]) == 0).all(axis=2).any(axis=1)
-
+        while M.any():
+            cb = D[:,None] * ((W[M] % P[:,None]) == 0).all(axis=2)
+            # Flip bounds where suppose to flip
+            cbf = F[M] * -1j * np.conj(cb) + (1-F[M]) * cb
+            # Sum up for each node
+            cbf_sum = cbf.sum(axis=0)
+            # Check each part and create a new complex number
+            D[M] = (cbf_sum.real >= 0) + 1j*(cbf_sum.imag >= 0)
+            # Query the next nodes to propagate
+            M = ((W[:,None] % P[M] == 0).all(axis=2).T).any(axis=0)
         return D
-    
-    def propagate(self) -> np.ndarray:
+
+    def propagate(self):
         """
             Propagates the graph, stores and returns the propagated bounds.
         """
-        D: np.ndarray = self._dmat[:,1:]
+        D: np.ndarray = self._dmat[:,1]
         P: np.ndarray = self._pmat[:,0]
         W: np.ndarray = self._pmat[:,1]
         F: np.ndarray = self._dmat.T[0]
 
-        # Find first node level to start propagating from
-        # Is done by first finding leafs..
-        _msk = (W == P).all(axis=1)
+        # Select all leafs
+        M = (W == P).all(axis=1)
+        
+        # Query which nodes are connected to any of the leafs
+        Q = ((W[:,None] % P[M] == 0).all(axis=2).T & ~M).any(axis=0)
 
-        # ..and then finding the nodes connected to the leafs
-        msk = ~_msk & (np.mod(W[:,None], P[_msk]) == 0).all(axis=2).any(axis=1)
+        # Propagate the graph and store the result as new bounds
+        self._dmat[:, 1] = self._prop_algo(D, P, W, F, Q)
 
-        bounds = self._prop_algo(D, P, W, F, msk)
-        self._dmat[:, 1:] = bounds
-        return bounds
-
-    def test(self, query: Dict[str, tuple], select: List[str]) -> np.ndarray:
+    def test(self, query: Dict[str, complex], select: List[str]) -> np.ndarray:
 
         """
             Propagates the graph and returns the selected result.
 
-            query: what nodes and their bound to start propagating from
+            query:  what nodes and their bound to start propagating from
             select: what nodes to return the propagated bounds for
 
             Returns the selected propagated bounds.
         """
-        D: np.ndarray = self._dmat[:,1:].copy()
+        D: np.ndarray = self._dmat[:,1].copy()
         P: np.ndarray = self._pmat[:,0]
         W: np.ndarray = self._pmat[:,1]
         F: np.ndarray = self._dmat.T[0]
@@ -203,10 +194,10 @@ class PLDAG:
         qprimes[[self._amap[q] for q in query]] = True
 
         # Replace the observed bounds
-        D[qprimes] = np.array(list(query.values()), dtype=np.int64)
+        D[qprimes] = np.array(list(query.values()))
 
         # One step forward before starting the loop
         # We don't need to propagate leaf nodes
-        msk = ~qprimes & (np.mod(W[:,None], P[qprimes]) == 0).all(axis=2).any(axis=1)
+        msk = ~qprimes & (np.mod(W[:, None], P[qprimes]) == 0).all(axis=2).any(axis=1)
 
         return self._prop_algo(D, P, W, F, msk)[[self._amap[s] for s in select]]

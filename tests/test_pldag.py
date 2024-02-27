@@ -9,7 +9,8 @@ def test_propagate():
     model = PLDAG()
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
-    assert np.array_equal(model.propagate(), np.array([[0, 1], [0, 1], [0, 1], [-1, -1], [0, 1]]))
+    model.propagate()
+    assert np.array_equal(model.get("A"), np.array([complex(1j)]))
 
     model = PLDAG()
     model.set_primitives("xyz")
@@ -17,42 +18,43 @@ def test_propagate():
     model.set_composite("B", "yz", -1, True)
     model.set_composite("A", "BC", -2)
     model.propagate()
-    assert np.array_equal(model.get("C"), np.array([0, 1]))
-    assert np.array_equal(model.get("B"), np.array([0, 1]))
-    assert np.array_equal(model.get("A"), np.array([0, 1]))
-    model.set_primitive("x", (1,1))
-    model.set_primitive("y", (0,0))
+    assert np.array_equal(model.get("C"), np.array([1j]))
+    assert np.array_equal(model.get("B"), np.array([1j]))
+    assert np.array_equal(model.get("A"), np.array([1j]))
+    model.set_primitive("x", 1+1j)
+    model.set_primitive("y", 0j)
     model.propagate()
-    assert np.array_equal(model.get("C"), np.array([1,1]))
-    assert np.array_equal(model.get("B"), np.array([1,1]))
-    assert np.array_equal(model.get("A"), np.array([1,1]))
+    assert np.array_equal(model.get("C"), np.array([1+1j]))
+    assert np.array_equal(model.get("B"), np.array([1+1j]))
+    assert np.array_equal(model.get("A"), np.array([1+1j]))
     
     model = PLDAG()
     model.set_primitives("xyz")
     model.set_composite("C", "x", 0, True)
     model.set_composite("B", "xy", -1)
     model.set_composite("A", "BC", -2)
-    assert np.array_equal(model.propagate(), np.array([[0, 1], [0, 1], [0, 1], [0, 0], [0, 1], [-1, -1], [0, 1], [-2,-2], [0, 1]]))
-    model.set_primitive("x", (1,1))
     model.propagate()
-    assert np.array_equal(model.get("C"), np.array([0,0]))
-    assert np.array_equal(model.get("A"), np.array([0,0]))
+    assert np.array_equal(model.bounds, np.array([1j, 1j, 1j, 0j, 1j, -1-1j, 1j, -2-2j, 1j]))
+    model.set_primitive("x", 1+1j)
+    model.propagate()
+    assert np.array_equal(model.get("C"), np.array([0j]))
+    assert np.array_equal(model.get("A"), np.array([0j]))
 
 def test_replace_composite():
     model = PLDAG()
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
     model.propagate()
-    assert np.array_equal(model.get("A"), np.array([0, 1]))
+    assert np.array_equal(model.get("A"), np.array([1j]))
     model.set_composite("A", "xyz", 0)
     model.propagate()
-    assert np.array_equal(model.get("A"), np.array([1, 1]))
+    assert np.array_equal(model.get("A"), np.array([1+1j]))
 
 def test_get():
     model = PLDAG()
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
-    for alias, expected in zip(["x", "y", "z", "A"], np.array([[0, 1], [0, 1], [0, 1], [0, 1]])):
+    for alias, expected in zip(["x", "y", "z", "A"], np.array([[1j], [1j], [1j], [1j]])):
         assert np.array_equal(model.get(alias), expected)
 
 def test_test():
@@ -60,17 +62,17 @@ def test_test():
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
 
-    result = model.test({"x": (1,1)}, "A")
-    assert np.array_equal(result, np.array([[1, 1]]))
+    result = model.test({"x": 1+1j}, "A")
+    assert np.array_equal(result, np.array([1+1j]))
 
-    result = model.test({"x": (0,1)}, "A")
-    assert np.array_equal(result, np.array([[0, 1]]))
+    result = model.test({"x": 1j}, "A")
+    assert np.array_equal(result, np.array([1j]))
 
-    result = model.test({"x": (0,0)}, "A")
-    assert np.array_equal(result, np.array([[0, 1]]))
+    result = model.test({"x": 0j}, "A")
+    assert np.array_equal(result, np.array([1j]))
 
-    result = model.test({"x": (0,0), "y": (0,0), "z": (0,0)}, "A")
-    assert np.array_equal(result, np.array([[0, 0]]))
+    result = model.test({"x": 0j, "y": 0j, "z": 0j}, "A")
+    assert np.array_equal(result, np.array([0j]))
 
 def test_counting_properties():
     for i in range(1, 10):
@@ -87,35 +89,35 @@ def test_test_second():
     np.array_equal(
         model.test(
             {
-                "x": (1,1), 
-                "y": (1,1), 
-                "z": (1,1)
+                "x": 1+1j, 
+                "y": 1+1j, 
+                "z": 1+1j
             }, 
             select='A'
         ),
-        np.array([[1,1]])
+        np.array([1+1j])
     )
     np.array_equal(
         model.test(
             {
-                "x": (1,1), 
-                "y": (0,0), 
-                "z": (1,1)
+                "x": 1+1j, 
+                "y": 0j, 
+                "z": 1+1j
             }, 
             select='A'
         ),
-        np.array([[0,0]])
+        np.array([0j])
     )
     np.array_equal(
         model.test(
             {
-                "x": (0,1), 
-                "y": (0,0), 
-                "z": (0,1)
+                "x": 1j, 
+                "y": 0j, 
+                "z": 1j
             }, 
             select='A'
         ),
-        np.array([[0,1]])
+        np.array([1j])
     )
 def test_dependencies():
     model = PLDAG(10) 
@@ -141,9 +143,9 @@ def test_negated():
     assert model.negated("x") == False
     assert model.negated("y") == False
 
-    assert np.array_equal(model.get("A"), np.array([0,1]))
-    assert np.array_equal(model.get("B"), np.array([0,1]))
-    assert np.array_equal(model.get("C"), np.array([0,1]))
+    assert np.array_equal(model.get("A"), np.array([1j]))
+    assert np.array_equal(model.get("B"), np.array([1j]))
+    assert np.array_equal(model.get("C"), np.array([1j]))
 
 def test_delete():
     model = PLDAG(3) 
@@ -155,9 +157,9 @@ def test_delete():
     model.propagate()
     # Since x is removed, C should be able to be true for ever
     # Same as C = 0 >= 0
-    np.array_equal(model.get("C"), np.array([1,1]))
+    np.array_equal(model.get("C"), np.array([1+1j]))
     # A and B should stay the same
-    np.array_equal(model.get("B"), np.array([0,1]))
-    np.array_equal(model.get("A"), np.array([1,1]))
+    np.array_equal(model.get("B"), np.array([1j]))
+    np.array_equal(model.get("A"), np.array([1+1j]))
     model.delete("y")
     model.propagate()
