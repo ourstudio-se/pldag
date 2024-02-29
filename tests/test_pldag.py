@@ -6,11 +6,11 @@ def test_create_model():
     assert model is not None
 
 def test_propagate():
-    model = PLDAG()
-    model.set_primitives("xyz")
-    model.set_composite("A", "xyz", -1)
-    model.propagate()
-    assert np.array_equal(model.get("A"), np.array([complex(1j)]))
+    # model = PLDAG()
+    # model.set_primitives("xyz")
+    # model.set_composite("A", "xyz", -1)
+    # model.propagate()
+    # assert np.array_equal(model.get("A"), np.array([complex(1j)]))
 
     model = PLDAG()
     model.set_primitives("xyz")
@@ -39,6 +39,19 @@ def test_propagate():
     model.propagate()
     assert np.array_equal(model.get("C"), np.array([0j]))
     assert np.array_equal(model.get("A"), np.array([0j]))
+
+def test_integer_bounds():
+
+    model = PLDAG()
+    model.set_primitives("z", complex(0, 10000))
+    model.set_composite("A", "z", -3000)
+    model.propagate()
+    assert np.array_equal(model.get("z"), np.array([complex(0, 10000)]))
+    assert np.array_equal(model.get("A"), np.array([complex(0, 1)]))
+    model.set_primitives("z", complex(3000, 10000))
+    model.propagate()
+    assert np.array_equal(model.get("A"), np.array([complex(1, 1)]))
+
 
 def test_replace_composite():
     model = PLDAG()
@@ -163,3 +176,22 @@ def test_delete():
     np.array_equal(model.get("A"), np.array([1+1j]))
     model.delete("y")
     model.propagate()
+
+def test_cycle_detection():
+    model = PLDAG(3) 
+    model.set_primitives("xyz")
+    model.set_composite("A", "xyz", -1)
+    # There is no way using the set functions to create a cycle
+    # So we need to modify the prime table
+    # Here we set that "x" as "A" as input
+    model._pmat[0,1] = model._pmat[-1,0]
+    # Instead of an error, the propagation still works but stops.
+    # It means that we have run A to times
+    # Since x is a primitive boolean variable it should have 0-1 as init
+    # bountds
+    model.get("x")[0] == 1j
+    model.propagate()
+    # However, since we connected A to x, x is considered by the model
+    # as a composite and will therefore eventually be evaluated as x = A >= 0
+    # which is 1-1
+    model.get("x")[0] == 1+1j

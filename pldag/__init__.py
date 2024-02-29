@@ -11,9 +11,9 @@ class PLDAG:
         In summary, this data structure combines elements of a DAG with a logic network, utilizing prime numbers to encode relationships and facilitate operations within the graph.
     """
 
-    PRIME_HEIGHT = 17
+    PRIME_HEIGHT = 15
     PRIMES = np.array([
-        1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
         31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
         73, 79, 83, 89, 97, 101, 103, 107, 109, 113,
         127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
@@ -130,7 +130,7 @@ class PLDAG:
             self._dmat = np.append(self._dmat, np.array([negate * 1, complex(0, 1)])[None], axis=0)
 
     @staticmethod
-    def _prop_algo(D: np.ndarray, P: np.ndarray, W: np.ndarray, F: np.ndarray, M: np.ndarray):
+    def _prop_algo(D: np.ndarray, P: np.ndarray, W: np.ndarray, F: np.ndarray):
 
         """
             Propagation algorithm.
@@ -139,21 +139,40 @@ class PLDAG:
             P: primitive prime combination matrix
             W: composite prime combination matrix
             F: flip bool matrix
-            M: mask for which nodes to start propagate from
 
             Returns the propagated bounds.
         """
 
-        while M.any():
-            cb = D[:,None] * ((W[M] % P[:,None]) == 0).all(axis=2)
+        # Initial nodes are the primitive nodes (no incoming edge)
+        N = (P == W).all(axis=1)
+
+        # Save primitive nodes for later use
+        _P = N.copy()
+
+        # Explored nodes
+        L = np.zeros(P.shape[0], dtype=bool)
+
+        # Edges matrix
+        E = (W % P[:,None] == 0).all(axis=2) #& ~(P == W).all(axis=1)[None]
+
+        while N.any():
+            # Find nodes M which has all it's edges in N
+            M = (E == E & N[:,None]).all(axis=0) & ~N
+            if not M.any():
+                break
+            # Select nodes we are going to use the bounds from
+            cb = D[:,None] * E[:,M]
             # Flip bounds where suppose to flip
             cbf = F[M] * -1j * np.conj(cb) + (1-F[M]) * cb
             # Sum up for each node
             cbf_sum = cbf.sum(axis=0)
             # Check each part and create a new complex number
-            D[M] = (cbf_sum.real >= 0) + 1j*(cbf_sum.imag >= 0)
-            # Query the next nodes to propagate
-            M = ((W[:,None] % P[M] == 0).all(axis=2).T).any(axis=0)
+            D[M] = ((cbf_sum.real >= 0) + 1j*(cbf_sum.imag >= 0)) * ~_P[M] + cbf_sum*_P[M]
+            # Append the nodes that was connected to M to L as explored
+            L |= E[:,M].any(axis=1)
+            # And remove them from N while adding the new nodes to N
+            N = (M | N) & ~E[:,M].any(axis=1)
+            
         return D
 
     def propagate(self):
@@ -165,14 +184,8 @@ class PLDAG:
         W: np.ndarray = self._pmat[:,1]
         F: np.ndarray = self._dmat.T[0]
 
-        # Select all leafs
-        M = (W == P).all(axis=1)
-        
-        # Query which nodes are connected to any of the leafs
-        Q = ((W[:,None] % P[M] == 0).all(axis=2).T & ~M).any(axis=0)
-
         # Propagate the graph and store the result as new bounds
-        self._dmat[:, 1] = self._prop_algo(D, P, W, F, Q)
+        self._dmat[:, 1] = self._prop_algo(D, P, W, F)
 
     def test(self, query: Dict[str, complex], select: List[str]) -> np.ndarray:
 
@@ -196,8 +209,4 @@ class PLDAG:
         # Replace the observed bounds
         D[qprimes] = np.array(list(query.values()))
 
-        # One step forward before starting the loop
-        # We don't need to propagate leaf nodes
-        msk = ~qprimes & (np.mod(W[:, None], P[qprimes]) == 0).all(axis=2).any(axis=1)
-
-        return self._prop_algo(D, P, W, F, msk)[[self._amap[s] for s in select]]
+        return self._prop_algo(D, P, W, F)[[self._amap[s] for s in select]]
