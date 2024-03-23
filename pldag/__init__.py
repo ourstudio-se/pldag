@@ -1,68 +1,45 @@
 import numpy as np
-from itertools import product, islice, chain
+from itertools import chain
+from functools import partial
 from typing import Dict, List
 
 class PLDAG:
 
     """
-        "Prime Logic Directed Acyclic Graph" data structure, or "PL-DAG" for short, is fundamentally a Directed Acyclic Graph (DAG) where each node represents a logical relationship, and the leaf nodes correspond to literals. 
+        "Primitive Logic Directed Acyclic Graph" data structure, or "PL-DAG" for short, is fundamentally a Directed Acyclic Graph (DAG) where each node represents a logical relationship, and the leaf nodes correspond to literals. 
         Each node in the graph encapsulates information about how its incoming nodes or leafs are logically related. For instance, a node might represent an AND operation, meaning that if it evaluates to true, all its incoming nodes or leafs must also evaluate to true.
-        What sets this structure apart is that each node and leaf is associated with a prime number, and each node computes a composite prime number based on the prime numbers of its incoming nodes or leafs. This prime-based system allows for efficient manipulation and traversal of the graph while preserving logical relationships.
+        
         In summary, this data structure combines elements of a DAG with a logic network, utilizing prime numbers to encode relationships and facilitate operations within the graph.
     """
 
-    PRIME_HEIGHT = 15
-    PRIMES = np.array([
-        2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
-        31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
-        73, 79, 83, 89, 97, 101, 103, 107, 109, 113,
-        127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
-        179, 181, 191, 193, 197, 199, 211, 223, 227, 229,
-        233, 239, 241, 251, 257, 263, 269, 271, 277, 281,
-        283, 293, 307, 311, 313, 317, 331, 337, 347, 349,
-    ])
-
-    def __init__(self, prime_width: int = 3):
-        if not prime_width > 0:
-            raise ValueError("prime_width must be a positive integer")
-        
-        # Width of prime combination. Restricts the possible number of variables.
-        self.PRIME_WIDTH = prime_width
-        # Prime combination matrix (primitive prime combination, composite prime combination)
-        self._pmat = np.empty((0, 2, self.PRIME_WIDTH), dtype=np.uint64)
-        # Flip bool and bound matrix (flip, complex bound)
-        self._dmat = np.empty((0, 2),                   dtype=np.complex128)
-        # Maps alias to prime index
+    def __init__(self):
+        """
+            max_deps: maximum number of dependencies allowed
+        """
+        # Adjacency matrix. Each entry is a boolean (0/1) indicating if there is a dependency
+        self._amat = np.zeros((0, 0),               dtype=np.int64)
+        # Boolean vector indicating if negated
+        self._nvec = np.zeros((0, 0),               dtype=np.int64)
+        # Complex vector representing bounds of complex number data type
+        self._dvec = np.zeros((0, 0),               dtype=complex)
+        # Maps alias to indexs
         self._amap = {}
+        # Keep tracks of the aliases to ignore/avoid
+        self._ign = set()
 
-    def _next_prime_combinations(self, start: int, end: int):
-        """Get the next prime combinations for the given range of indices"""
-        # Note we add one to skip the first prime combination of (1, 1, 1, ...)
-        return np.array(list(islice(product(self.PRIMES[:self.PRIME_HEIGHT], repeat=self.PRIME_WIDTH), start+1, end+1)), dtype=np.uint64)
-
-    @property
-    def n_max(self) -> int:
-        """Maximum number of variables possible"""
-        return self.PRIME_HEIGHT ** self.PRIME_WIDTH
-
-    @property
-    def n_left(self) -> int:
-        """How many variables are left to be used"""
-        return self.n_max - self._pmat.shape[0]
-    
-    @property
-    def n_used(self) -> int:
-        """How many variables are used"""
-        return self._pmat.shape[0]
-    
     @property
     def bounds(self) -> np.ndarray:
         """Get the bounds of all aliases"""
-        return self._dmat.T[1]
+        return self._dvec
+    
+    @property
+    def aliases(self) -> List[str]:
+        """Get all aliases"""
+        return list(filter(lambda a: a not in self._ign, self._amap.keys()))
     
     def get(self, *alias: str) -> np.ndarray:
         """Get the bounds of the given alias"""
-        return self._dmat[[self._amap[a] for a in alias]].T[1]
+        return self._dvec[[self._amap[a] for a in alias]]
     
     def dependencies(self, alias: str) -> List[str]:
         """Get the dependencies of the given alias"""
@@ -71,39 +48,39 @@ class PLDAG:
                 lambda x: x != alias,
                 map(
                     lambda x: list(self._amap)[x],
-                    np.argwhere(
-                        (np.mod(self._pmat[self._amap[alias]][1], self._pmat[:,0]) == 0).all(axis=1)
-                    ).T[0]
+                    np.argwhere(self._amat[self._amap[alias]] == 1).T[0]
                 )
             )
         )
     
     def negated(self, alias: str) -> bool:
         """Get the negated state of the given alias"""
-        return bool(self._dmat[self._amap[alias]][0])
+        return bool(self._nvec[self._amap[alias]])
     
     def delete(self, alias: str) -> None:
         """Delete the given alias"""
         idx = self._amap[alias]
-        primitive_prime = self._pmat[idx][0]
 
         # Remove the primitive prime for all composite primes
-        for i in np.argwhere((np.mod(self._pmat[:,1], primitive_prime) == 0).all(axis=1)).T[0]:
-            self._pmat[i][1] = np.true_divide(self._pmat[i][1], primitive_prime).astype(np.uint64)
-
-        self._pmat = np.delete(self._pmat, idx, axis=0)
-        self._dmat = np.delete(self._dmat, idx, axis=0)
-        self._amap = {k: v - 1 if v > idx else v for k, v in self._amap.items() if k != alias}
+        # May be changed later. Now we just set everything to 0
+        # but keep the rows and columns
+        self._amat[idx, :] = 0
+        self._amat[:, idx] = 0
+        self._ign.add(alias)
     
-    def set_primitive(self, alias: str, bound: complex = complex(0,1)) -> None:
+    def set_primitive(self, alias: str, bound: complex = complex(0,1), hide: bool = False) -> None:
         """Add a primitive prime factor matrix"""
         if alias in self._amap:
-            self._dmat[self._amap[alias]][1] = bound
+            # Update value if already in map
+            self._dvec[self._amap[alias]] = bound
         else:
-            new_primitive_prime = self._next_prime_combinations(self._pmat.shape[0], self._pmat.shape[0] + 1)[0]
-            self._pmat = np.append(self._pmat, np.array([new_primitive_prime, new_primitive_prime], dtype=np.uint64)[None], axis=0)
-            self._dmat = np.append(self._dmat, np.array([0, bound])[None], axis=0)
-            self._amap[alias] = len(self._pmat) - 1
+            self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
+            self._dvec = np.append(self._dvec, bound)
+            self._amap[alias] = self._amat.shape[0] - 1
+            self._nvec = np.append(self._nvec, 0)
+
+        if hide:
+            self._ign.add(alias)
 
     def set_primitives(self, aliases: List[str], bound: complex = complex(0,1)) -> None:
         """Add multiple primitive prime factor matrices"""
@@ -115,77 +92,66 @@ class PLDAG:
             Add a composite prime factor matrix.
             If alias already registred, only the prime factor matrix is updated.
         """
-        for child in children:
-            if child not in self._amap:
-                self.set_primitive(child, (0,1))
-        self.set_primitive(f"{bias}", complex(bias, bias))
-        composite_prime = np.lcm.reduce([self._pmat[self._amap[child]][0] for child in chain(children, [str(bias)])])
+        valued_childrend = list(chain(map(lambda x: (x, complex(0,1), False), children), [(str(bias), complex(bias, bias), True)]))
+        for child_alias, value, hide in valued_childrend:
+            if child_alias not in self._amap:
+                self.set_primitive(child_alias, value, hide)
         if alias in self._amap:
-            self._pmat[self._amap[alias]][1] = composite_prime
-            self._dmat[self._amap[alias]] = np.array([negate * 1, complex(0, 1)])
+            arr = np.zeros(self._amat.shape[1], dtype=np.int64)
+            arr[[self._amap[child] for child,_,_ in valued_childrend]] = 1
+            self._amat[self._amap[alias]] = arr
+            self._dvec[self._amap[alias]] = complex(0, 1)
+            self._nvec[self._amap[alias]] = negate * 1
         else:
-            new_primitive_prime = self._next_prime_combinations(self._pmat.shape[0], self._pmat.shape[0] + 1)[0]
-            self._pmat = np.append(self._pmat, np.array([new_primitive_prime, composite_prime], dtype=np.uint64)[None], axis=0)
-            self._amap[alias] = len(self._pmat) - 1
-            self._dmat = np.append(self._dmat, np.array([negate * 1, complex(0, 1)])[None], axis=0)
+            self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
+            arr = np.zeros(self._amat.shape[1], dtype=np.int64)
+            arr[[self._amap[child] for child,_,_ in valued_childrend]] = 1
+            self._amat[self._amat.shape[0] - 1] = arr
+            self._dvec = np.append(self._dvec, complex(0, 1))
+            self._nvec = np.append(self._nvec, negate * 1)
+            self._amap[alias] = self._amat.shape[0] - 1
 
     @staticmethod
-    def _prop_algo(D: np.ndarray, P: np.ndarray, W: np.ndarray, F: np.ndarray):
+    def _prop_algo(A: np.ndarray, F: np.ndarray, B: np.ndarray, max_iterations: int = 100):
 
         """
             Propagation algorithm.
 
-            D: complex bounds matrix
-            P: primitive prime combination matrix
-            W: composite prime combination matrix
-            F: flip bool matrix
+            A: the adjacency matrix
+            F: the negation array
+            initial_B: the initial bounds
+            max_iterations: the maximum number of iterations
 
             Returns the propagated bounds.
         """
 
-        # Initial nodes are the primitive nodes (no incoming edge)
-        N = (P == W).all(axis=1)
+        def _prop_once(A, C, F, B):
+            r = A.dot(B) 
+            rf = (F * -1j * np.conj(r) + (1-F) * r) * ~C
+            return C*B + ((rf.real >= 0) + 1j*(rf.imag >= 0)) * ~C
 
-        # Save primitive nodes for later use
-        _P = N.copy()
-
-        # Explored nodes
-        L = np.zeros(P.shape[0], dtype=bool)
-
-        # Edges matrix
-        E = (W % P[:,None] == 0).all(axis=2) #& ~(P == W).all(axis=1)[None]
-
-        while N.any():
-            # Find nodes M which has all it's edges in N
-            M = (E == E & N[:,None]).all(axis=0) & ~N
-            if not M.any():
-                break
-            # Select nodes we are going to use the bounds from
-            cb = D[:,None] * E[:,M]
-            # Flip bounds where suppose to flip
-            cbf = F[M] * -1j * np.conj(cb) + (1-F[M]) * cb
-            # Sum up for each node
-            cbf_sum = cbf.sum(axis=0)
-            # Check each part and create a new complex number
-            D[M] = ((cbf_sum.real >= 0) + 1j*(cbf_sum.imag >= 0)) * ~_P[M] + cbf_sum*_P[M]
-            # Append the nodes that was connected to M to L as explored
-            L |= E[:,M].any(axis=1)
-            # And remove them from N while adding the new nodes to N
-            N = (M | N) & ~E[:,M].any(axis=1)
-            
-        return D
+        C = (A == 0).all(axis=1)
+        prop = partial(_prop_once, A, C, F)
+        
+        previous_B = B
+        for _ in range(max_iterations):
+            new_B = prop(previous_B)
+            if (new_B == previous_B).all():
+                return new_B
+            previous_B = new_B
+        
+        raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
 
     def propagate(self):
         """
             Propagates the graph, stores and returns the propagated bounds.
         """
-        D: np.ndarray = self._dmat[:,1]
-        P: np.ndarray = self._pmat[:,0]
-        W: np.ndarray = self._pmat[:,1]
-        F: np.ndarray = self._dmat.T[0]
+        A: np.ndarray = self._amat
+        B: np.ndarray = self._dvec
+        F: np.ndarray = self._nvec
 
         # Propagate the graph and store the result as new bounds
-        self._dmat[:, 1] = self._prop_algo(D, P, W, F)
+        self._dvec = self._prop_algo(A, F, B)
 
     def test(self, query: Dict[str, complex], select: List[str]) -> np.ndarray:
 
@@ -197,16 +163,15 @@ class PLDAG:
 
             Returns the selected propagated bounds.
         """
-        D: np.ndarray = self._dmat[:,1].copy()
-        P: np.ndarray = self._pmat[:,0]
-        W: np.ndarray = self._pmat[:,1]
-        F: np.ndarray = self._dmat.T[0]
+        A: np.ndarray = self._amat
+        B: np.ndarray = self._dvec
+        F: np.ndarray = self._nvec
 
         # Query translation into primes
-        qprimes = np.zeros(P.shape[0], dtype=bool)
+        qprimes = np.zeros(B.shape[0], dtype=bool)
         qprimes[[self._amap[q] for q in query]] = True
 
         # Replace the observed bounds
-        D[qprimes] = np.array(list(query.values()))
+        B[qprimes] = np.array(list(query.values()))
 
-        return self._prop_algo(D, P, W, F)[[self._amap[s] for s in select]]
+        return self._prop_algo(A, F, B)[[self._amap[s] for s in select]]

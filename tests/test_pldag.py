@@ -87,14 +87,8 @@ def test_test():
     result = model.test({"x": 0j, "y": 0j, "z": 0j}, "A")
     assert np.array_equal(result, np.array([0j]))
 
-def test_counting_properties():
-    for i in range(1, 10):
-        model = PLDAG(i)
-        assert model.n_max == model.PRIME_HEIGHT ** i
-        assert model.n_left == model.PRIME_HEIGHT ** i
-
 def test_test_second():
-    model = PLDAG(10) 
+    model = PLDAG() 
     model.set_primitives("xyz")
     model.set_composite("C", ["x"], 0, True)
     model.set_composite("B", ["y", "z"], -2)
@@ -133,7 +127,7 @@ def test_test_second():
         np.array([1j])
     )
 def test_dependencies():
-    model = PLDAG(10) 
+    model = PLDAG() 
     model.set_primitives("xyz")
     model.set_composite("C", ["x"], 0, True)
     model.set_composite("B", ["y", "z"], -2)
@@ -145,7 +139,7 @@ def test_dependencies():
     assert model.dependencies("y") == []
 
 def test_negated():
-    model = PLDAG(10) 
+    model = PLDAG() 
     model.set_primitives("xyz")
     model.set_composite("C", ["x"], 0, True)
     model.set_composite("B", ["y", "z"], +1, True)
@@ -161,7 +155,7 @@ def test_negated():
     assert np.array_equal(model.get("C"), np.array([1j]))
 
 def test_delete():
-    model = PLDAG(3) 
+    model = PLDAG() 
     model.set_primitives("xyz")
     model.set_composite("C", ["x"], 0, True)
     model.set_composite("B", ["y", "z"], +1, True)
@@ -178,13 +172,13 @@ def test_delete():
     model.propagate()
 
 def test_cycle_detection():
-    model = PLDAG(3) 
+    model = PLDAG() 
     model.set_primitives("xyz")
     model.set_composite("A", "xyz", -1)
     # There is no way using the set functions to create a cycle
     # So we need to modify the prime table
     # Here we set that "x" as "A" as input
-    model._pmat[0,1] = model._pmat[-1,0]
+    model._amat[0,-1] = 1
     # Instead of an error, the propagation still works but stops.
     # It means that we have run A to times
     # Since x is a primitive boolean variable it should have 0-1 as init
