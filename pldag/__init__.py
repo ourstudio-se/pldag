@@ -164,7 +164,7 @@ class PLDAG:
             Returns the selected propagated bounds.
         """
         A: np.ndarray = self._amat
-        B: np.ndarray = self._dvec
+        B: np.ndarray = self._dvec.copy()
         F: np.ndarray = self._nvec
 
         # Query translation into primes

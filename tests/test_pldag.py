@@ -93,7 +93,7 @@ def test_test_second():
     model.set_composite("C", ["x"], 0, True)
     model.set_composite("B", ["y", "z"], -2)
     model.set_composite("A", ["B", "C"], -1)
-    np.array_equal(
+    assert np.array_equal(
         model.test(
             {
                 "x": 1+1j, 
@@ -104,7 +104,11 @@ def test_test_second():
         ),
         np.array([1+1j])
     )
-    np.array_equal(
+    # So that the model wasn't changed
+    assert model.get("x") == +1j
+    assert model.get("y") == +1j
+    assert model.get("z") == +1j
+    assert np.array_equal(
         model.test(
             {
                 "x": 1+1j, 
@@ -115,7 +119,7 @@ def test_test_second():
         ),
         np.array([0j])
     )
-    np.array_equal(
+    assert np.array_equal(
         model.test(
             {
                 "x": 1j, 
