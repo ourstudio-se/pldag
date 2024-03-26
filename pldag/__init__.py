@@ -1,7 +1,8 @@
 import numpy as np
+from hashlib import sha256
 from itertools import chain
 from functools import partial
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
 class PLDAG:
 
@@ -22,7 +23,9 @@ class PLDAG:
         self._nvec = np.zeros((0, 0),               dtype=np.int64)
         # Complex vector representing bounds of complex number data type
         self._dvec = np.zeros((0, 0),               dtype=complex)
-        # Maps alias to indexs
+        # Maps id's to index
+        self._imap = {}
+        # Maps alias to id's
         self._amap = {}
         # Keep tracks of the aliases to ignore/avoid
         self._ign = set()
@@ -35,31 +38,46 @@ class PLDAG:
     @property
     def aliases(self) -> List[str]:
         """Get all aliases"""
-        return list(filter(lambda a: a not in self._ign, self._amap.keys()))
+        return list(filter(lambda a: a not in self._ign, self._imap.keys()))
+    
+    @property
+    def _rev_amap(self) -> dict:
+        # Reversing the dictionary
+        reversed_dict = {}
+        for key, value in self._amap.items():
+            reversed_dict.setdefault(value, set()).add(key)
+        return reversed_dict
+    
+    def _index_from_alias(self, alias: str) -> str:
+        return self._imap[self._amap.get(alias, alias)]
     
     def get(self, *alias: str) -> np.ndarray:
         """Get the bounds of the given alias"""
-        return self._dvec[[self._amap[a] for a in alias]]
+        return self._dvec[list(map(self._index_from_alias, alias))]
     
-    def dependencies(self, alias: str) -> List[str]:
-        """Get the dependencies of the given alias"""
-        return list(
-            filter(
-                lambda x: x != alias,
+    def dependencies(self, alias: str) -> Dict[str, Set[str]]:
+        """
+            Get the dependencies of the given alias or ID.
+            A mapping of ID -> {Alias} is returned, where each ID
+            is a dependency to `alias`.
+        """
+        return dict(
+            map(
+                lambda x: (x, self._rev_amap[x]),
                 map(
-                    lambda x: list(self._amap)[x],
-                    np.argwhere(self._amat[self._amap[alias]] == 1).T[0]
+                    lambda x: list(self._imap)[x],
+                    np.argwhere(self._amat[self._index_from_alias(alias)] == 1).T[0]
                 )
             )
         )
     
     def negated(self, alias: str) -> bool:
         """Get the negated state of the given alias"""
-        return bool(self._nvec[self._amap[alias]])
+        return bool(self._nvec[self._index_from_alias(alias)])
     
     def delete(self, alias: str) -> None:
         """Delete the given alias"""
-        idx = self._amap[alias]
+        idx = self._imap[alias]
 
         # Remove the primitive prime for all composite primes
         # May be changed later. Now we just set everything to 0
@@ -72,11 +90,12 @@ class PLDAG:
         """Add a primitive prime factor matrix"""
         if alias in self._amap:
             # Update value if already in map
-            self._dvec[self._amap[alias]] = bound
+            self._dvec[self._index_from_alias(alias)] = bound
         else:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
             self._dvec = np.append(self._dvec, bound)
-            self._amap[alias] = self._amat.shape[0] - 1
+            self._imap[alias] = self._amat.shape[0] - 1
+            self._amap[alias] = alias
             self._nvec = np.append(self._nvec, 0)
 
         if hide:
@@ -87,29 +106,51 @@ class PLDAG:
         for alias in aliases:
             self.set_primitive(alias, bound)
 
-    def set_composite(self, alias: str, children: list, bias: int, negate: bool = False) -> None:
+    def set_composite(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> None:
         """
             Add a composite prime factor matrix.
             If alias already registred, only the prime factor matrix is updated.
         """
-        valued_childrend = list(chain(map(lambda x: (x, complex(0,1), False), children), [(str(bias), complex(bias, bias), True)]))
-        for child_alias, value, hide in valued_childrend:
-            if child_alias not in self._amap:
+        valued_children = sorted(
+            chain(
+                map(
+                    lambda x: (
+                        self._amap.get(x, x),
+                        complex(0,1), 
+                        False,
+                    ), 
+                    children
+                ), 
+                [
+                    (
+                        str(bias), 
+                        complex(bias, bias), 
+                        True,
+                    )
+                ]
+            ), 
+            key=lambda x: x[0]
+        )
+        for child_alias, value, hide in valued_children:
+            if child_alias not in self._imap:
                 self.set_primitive(child_alias, value, hide)
-        if alias in self._amap:
+
+        _id = sha256(str(valued_children).encode()).hexdigest()
+        if _id in self._imap:
             arr = np.zeros(self._amat.shape[1], dtype=np.int64)
-            arr[[self._amap[child] for child,_,_ in valued_childrend]] = 1
-            self._amat[self._amap[alias]] = arr
-            self._dvec[self._amap[alias]] = complex(0, 1)
-            self._nvec[self._amap[alias]] = negate * 1
+            arr[[self._imap[child] for child,_,_ in valued_children]] = 1
+            self._amat[self._imap[_id]] = arr
+            self._dvec[self._imap[_id]] = complex(0, 1)
+            self._nvec[self._imap[_id]] = negate * 1
         else:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
             arr = np.zeros(self._amat.shape[1], dtype=np.int64)
-            arr[[self._amap[child] for child,_,_ in valued_childrend]] = 1
+            arr[[self._imap[child] for child,_,_ in valued_children]] = 1
             self._amat[self._amat.shape[0] - 1] = arr
             self._dvec = np.append(self._dvec, complex(0, 1))
             self._nvec = np.append(self._nvec, negate * 1)
-            self._amap[alias] = self._amat.shape[0] - 1
+            self._imap[_id] = self._amat.shape[0] - 1
+        self._amap[alias] = _id
 
     @staticmethod
     def _prop_algo(A: np.ndarray, F: np.ndarray, B: np.ndarray, max_iterations: int = 100):
@@ -153,7 +194,7 @@ class PLDAG:
         # Propagate the graph and store the result as new bounds
         self._dvec = self._prop_algo(A, F, B)
 
-    def test(self, query: Dict[str, complex], select: List[str]) -> np.ndarray:
+    def test(self, query: Dict[str, complex], select: Optional[List[str]] = None) -> np.ndarray:
 
         """
             Propagates the graph and returns the selected result.
@@ -169,9 +210,13 @@ class PLDAG:
 
         # Query translation into primes
         qprimes = np.zeros(B.shape[0], dtype=bool)
-        qprimes[[self._amap[q] for q in query]] = True
+        qprimes[[self._imap[q] for q in query]] = True
 
         # Replace the observed bounds
         B[qprimes] = np.array(list(query.values()))
 
-        return self._prop_algo(A, F, B)[[self._amap[s] for s in select]]
+        # Select all if none selected
+        if select is None:
+            select = sorted(set(self._amap.keys()))
+
+        return self._prop_algo(A, F, B)[[self._index_from_alias(s) for s in select]]
