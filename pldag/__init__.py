@@ -1,8 +1,9 @@
 import numpy as np
 from hashlib import sha256
-from itertools import chain
+from itertools import chain, groupby
 from functools import partial
 from typing import Dict, List, Optional, Set
+from graphlib import TopologicalSorter
 
 class PLDAG:
 
@@ -14,15 +15,12 @@ class PLDAG:
     """
 
     def __init__(self):
-        """
-            max_deps: maximum number of dependencies allowed
-        """
         # Adjacency matrix. Each entry is a boolean (0/1) indicating if there is a dependency
-        self._amat = np.zeros((0, 0),               dtype=np.int64)
+        self._amat = np.zeros((0, 0),   dtype=np.int64)
         # Boolean vector indicating if negated
-        self._nvec = np.zeros((0, 0),               dtype=np.int64)
+        self._nvec = np.zeros((0, ),    dtype=np.int64)
         # Complex vector representing bounds of complex number data type
-        self._dvec = np.zeros((0, 0),               dtype=complex)
+        self._dvec = np.zeros((0, ),    dtype=complex)
         # Maps id's to index
         self._imap = {}
         # Maps alias to id's
@@ -39,6 +37,17 @@ class PLDAG:
     def aliases(self) -> List[str]:
         """Get all aliases"""
         return list(filter(lambda a: a not in self._ign, self._imap.keys()))
+    
+    @property
+    def _toposort(self) -> iter:
+        return TopologicalSorter(
+            dict(
+                map(
+                    lambda x: (x[0], set(map(lambda y: y[1], x[1]))), 
+                    groupby(np.argwhere(self._amat), key=lambda x: x[0])
+                )
+            )
+        ).static_order()
     
     @property
     def _rev_amap(self) -> dict:
@@ -86,7 +95,7 @@ class PLDAG:
         self._amat[:, idx] = 0
         self._ign.add(alias)
     
-    def set_primitive(self, alias: str, bound: complex = complex(0,1), hide: bool = False) -> None:
+    def set_primitive(self, alias: str, bound: complex = complex(0,1), hide: bool = False) -> str:
         """Add a primitive prime factor matrix"""
         if alias in self._amap:
             # Update value if already in map
@@ -101,12 +110,44 @@ class PLDAG:
         if hide:
             self._ign.add(alias)
 
-    def set_primitives(self, aliases: List[str], bound: complex = complex(0,1)) -> None:
+        return alias
+
+    def set_primitives(self, aliases: List[str], bound: complex = complex(0,1)) -> List[str]:
         """Add multiple primitive prime factor matrices"""
         for alias in aliases:
             self.set_primitive(alias, bound)
+        return aliases
 
-    def set_composite(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> None:
+    def _set_composite(self, valued_children: list, negate: bool = False, aliases: List[str] = []) -> str:
+        for child_alias, value, hide in valued_children:
+            if child_alias not in self._imap:
+                self.set_primitive(child_alias, value, hide)
+
+        _id = sha256(str(valued_children).encode()).hexdigest()
+        if _id in self._imap:
+            arr = np.zeros(self._amat.shape[1], dtype=np.int64)
+            arr[[self._imap[child] for child,_,_ in valued_children]] = 1
+            self._amat[self._imap[_id]] = arr
+            self._dvec[self._imap[_id]] = complex(0, 1)
+            self._nvec[self._imap[_id]] = negate * 1
+        else:
+            self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
+            arr = np.zeros(self._amat.shape[1], dtype=np.int64)
+            arr[[self._imap[child] for child,_,_ in valued_children]] = 1
+            self._amat[self._amat.shape[0] - 1] = arr
+            self._dvec = np.append(self._dvec, complex(0, 1))
+            self._nvec = np.append(self._nvec, negate * 1)
+            self._imap[_id] = self._amat.shape[0] - 1
+        
+        if aliases:
+            for alias in aliases:
+                self._amap[alias] = _id
+        else:
+            self._amap[_id] = _id
+
+        return _id
+    
+    def set_composite(self, children: list, bias: int, negate: bool = False, aliases: List[str] = []) -> str:
         """
             Add a composite prime factor matrix.
             If alias already registred, only the prime factor matrix is updated.
@@ -131,37 +172,19 @@ class PLDAG:
             ), 
             key=lambda x: x[0]
         )
-        for child_alias, value, hide in valued_children:
-            if child_alias not in self._imap:
-                self.set_primitive(child_alias, value, hide)
-
-        _id = sha256(str(valued_children).encode()).hexdigest()
-        if _id in self._imap:
-            arr = np.zeros(self._amat.shape[1], dtype=np.int64)
-            arr[[self._imap[child] for child,_,_ in valued_children]] = 1
-            self._amat[self._imap[_id]] = arr
-            self._dvec[self._imap[_id]] = complex(0, 1)
-            self._nvec[self._imap[_id]] = negate * 1
-        else:
-            self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            arr = np.zeros(self._amat.shape[1], dtype=np.int64)
-            arr[[self._imap[child] for child,_,_ in valued_children]] = 1
-            self._amat[self._amat.shape[0] - 1] = arr
-            self._dvec = np.append(self._dvec, complex(0, 1))
-            self._nvec = np.append(self._nvec, negate * 1)
-            self._imap[_id] = self._amat.shape[0] - 1
-        self._amap[alias] = _id
+        return self._set_composite(valued_children, negate, aliases)
 
     @staticmethod
-    def _prop_algo(A: np.ndarray, F: np.ndarray, B: np.ndarray, max_iterations: int = 100):
+    def _prop_algo(A: np.ndarray, F: np.ndarray, B: np.ndarray, forced: np.ndarray, max_iterations: int = 100):
 
         """
             Propagation algorithm.
 
             A: the adjacency matrix
             F: the negation array
-            initial_B: the initial bounds
-            max_iterations: the maximum number of iterations
+            B: the initial bounds
+            forced: boolean (won't change during propagation) (optional)
+            max_iterations: the maximum number of iterations (optional)
 
             Returns the propagated bounds.
         """
@@ -176,7 +199,7 @@ class PLDAG:
         
         previous_B = B
         for _ in range(max_iterations):
-            new_B = prop(previous_B)
+            new_B = forced * B + ~forced * prop(previous_B)
             if (new_B == previous_B).all():
                 return new_B
             previous_B = new_B
@@ -192,9 +215,31 @@ class PLDAG:
         F: np.ndarray = self._nvec
 
         # Propagate the graph and store the result as new bounds
-        self._dvec = self._prop_algo(A, F, B)
+        self._dvec = self._prop_algo(A, F, B, np.zeros(B.shape[0], dtype=bool))
+    
+    def _test(self, query: Dict[str, complex]) -> np.ndarray:
+        
+        """
+            Propagates the graph and returns the propagated bounds.
 
-    def test(self, query: Dict[str, complex], select: Optional[List[str]] = None) -> np.ndarray:
+            query: what nodes and their bound to start propagating from
+
+            Returns the propagated bounds.
+        """
+        A: np.ndarray = self._amat
+        B: np.ndarray = self._dvec.copy()
+        F: np.ndarray = self._nvec
+
+        # Query translation into primes
+        qprimes = np.zeros(B.shape[0], dtype=bool)
+        qprimes[[self._imap[q] for q in query]] = True
+
+        # Replace the observed bounds
+        B[qprimes] = np.array(list(query.values()))
+
+        return self._prop_algo(A, F, B, qprimes)
+
+    def test(self, query: Dict[str, complex], select: Optional[List[str]] = None) -> Dict[str, complex]:
 
         """
             Propagates the graph and returns the selected result.
@@ -217,6 +262,24 @@ class PLDAG:
 
         # Select all if none selected
         if select is None:
-            select = sorted(set(self._amap.keys()))
+            select = set(self._amap.keys()).difference(self._ign)
 
-        return self._prop_algo(A, F, B)[[self._index_from_alias(s) for s in select]]
+        return dict(zip(select, self._prop_algo(A, F, B, qprimes)[[self._index_from_alias(s) for s in select]]))
+    
+    def lor(self, references: List[str], aliases: List[str] = []) -> str:
+        return self.set_composite(references, -1, aliases=aliases)
+    
+    def land(self, references: List[str], aliases: List[str] = []) -> str:
+        return self.set_composite(references, -len(references), aliases=aliases)
+    
+    def lnot(self, references: List[str], aliases: List[str] = []) -> str:
+        return self.set_composite(references, 0, True, aliases=aliases)
+    
+    def lxor(self, references: List[str], aliases: List[str] = []) -> str:
+        return self.land([
+            self.lor(references),
+            self.lnot(self.land(references)),
+        ], aliases=aliases)
+    
+    def limply(self, condition: str, consequence: str, aliases: List[str] = []) -> str:
+        return self.lor([self.lnot([condition]), consequence], aliases=aliases)
