@@ -283,3 +283,76 @@ class PLDAG:
     
     def limply(self, condition: str, consequence: str, aliases: List[str] = []) -> str:
         return self.lor([self.lnot([condition]), consequence], aliases=aliases)
+
+    def polyhedron(self, fix: dict = {}) -> tuple:
+
+        """
+            Returns a polyhedron of a tuple (A, b, variables) representation of the PL-DAG.
+            The variables list consists of tuples of (ID, set of aliases, bound as complex number).
+
+            fix: dict of aliases to fix in the polyhedron. E.g. {"A": 1, "B": 0} fix A=1 and B=0.
+        """
+
+        # Create the matrix (+1 for bias term)
+        M = np.zeros((len(self._imap), len(self._imap)), dtype=np.int64)
+
+        # Create the bias mask
+        bias_msk = self._dvec.real == self._dvec.imag
+
+        # Adjacent points
+        adj_points = np.argwhere(self._amat * ~bias_msk == 1)
+
+        # Fill the matrix
+        M[adj_points.T[0], adj_points.T[1]] = 1
+
+        # Flip the once that are negated
+        M[self._nvec == 1] *= -1
+
+        # Fill the diagonal
+        np.fill_diagonal(M, -1*np.abs(M.sum(axis=1)))
+
+        # Create the bias vector
+        b_part_one = -1 * (self._dvec.real * bias_msk * self._amat).sum(axis=1)
+        b_part_two = (self._nvec * -1) + ((1-self._nvec) * 1)
+        b = b_part_one * b_part_two - (self._amat * ~bias_msk).sum(axis=1)
+
+        # Remove all zero rows
+        zero_rows_mask = ~np.all(M == 0, axis=1)
+        A = M[zero_rows_mask]
+        b = b[zero_rows_mask].astype(np.int64)
+
+        # Fix the columns in `fix`
+        for i, vs in groupby(zip(fix.values(), fix.keys()), key=lambda x: x[0]):
+            v = list(map(lambda x: x[1], vs))
+            a = np.zeros(A.shape[1], dtype=np.int64)
+            a[np.array(list(map(self._index_from_alias, v)))] = 1
+            if i > 0 or i < 0:
+                _b = a.sum() * i
+            else:
+                _b = 0
+
+            A = np.vstack([A, a])
+            b = np.append(b, _b)
+
+        # Remove all zero columns
+        zero_cols_mask = ~np.all(A == 0, axis=0)
+        A = A[:, zero_cols_mask]
+
+        # Reverse index map
+        rimap = dict(map(lambda x: (x[1], x[0]), self._imap.items()))
+
+        # Create the variable list
+        variables = np.array(
+            list(
+                map(
+                    lambda i: (
+                        rimap[i],
+                        self._rev_amap[rimap[i]],
+                        self._dvec[i],
+                    ),
+                    np.array(list(self._imap.values()))[zero_cols_mask]
+                )
+            )
+        )
+
+        return A, b, variables

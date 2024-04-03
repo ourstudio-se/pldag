@@ -200,3 +200,24 @@ def test_multiple_alias():
     model.set_composite(["A", "B"], -1, aliases=["C"])
     dependencies = model.dependencies("C")
     assert dependencies[model._amap["A"]] == dependencies[model._amap["B"]]
+
+def test_polyhedron():
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_composite("xyz", -1, aliases=["A"])
+    A,b,vs = model.polyhedron()
+    assert np.array_equal(A, np.array([[1,1,1,-3]]))
+    assert np.array_equal(b, np.array([-2]))
+    assert len(vs) == 4
+
+    A,b,vs = model.polyhedron(fix={"A": 1, "x": 1, "y": 1, "z": 1})
+    assert np.array_equal(A, np.array([[1,1,1,-3], [1,1,1,1]]))
+    assert np.array_equal(b, np.array([-2, 4]))
+
+    A,b,vs = model.polyhedron(fix={"A": -1, "x": -1, "y": -1, "z": -1})
+    assert np.array_equal(A, np.array([[1,1,1,-3], [1,1,1,1]]))
+    assert np.array_equal(b, np.array([-2, -4]))
+
+    A,b,vs = model.polyhedron(fix={"A": 2, "x": 2, "y": 0, "z": 0})
+    assert np.array_equal(A, np.array([[1,1,1,-3], [1,0,0,1], [0,1,1,0]]))
+    assert np.array_equal(b, np.array([-2, 4, 0]))
