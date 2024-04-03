@@ -118,12 +118,12 @@ class PLDAG:
             self.set_primitive(alias, bound)
         return aliases
 
-    def _set_composite(self, valued_children: list, negate: bool = False, aliases: List[str] = []) -> str:
+    def _set_composite(self, valued_children: list, negate: bool = False, aliases: List[str] = [], force_id: Optional[str] = None) -> str:
         for child_alias, value, hide in valued_children:
             if child_alias not in self._imap:
                 self.set_primitive(child_alias, value, hide)
 
-        _id = sha256(str(valued_children).encode()).hexdigest()
+        _id = sha256(str(valued_children).encode()).hexdigest() if force_id is None else force_id
         if _id in self._imap:
             arr = np.zeros(self._amat.shape[1], dtype=np.int64)
             arr[[self._imap[child] for child,_,_ in valued_children]] = 1
@@ -147,7 +147,7 @@ class PLDAG:
 
         return _id
     
-    def set_composite(self, children: list, bias: int, negate: bool = False, aliases: List[str] = []) -> str:
+    def set_composite(self, children: list, bias: int, negate: bool = False, aliases: List[str] = [], force_id: Optional[str] = None) -> str:
         """
             Add a composite prime factor matrix.
             If alias already registred, only the prime factor matrix is updated.
@@ -172,7 +172,7 @@ class PLDAG:
             ), 
             key=lambda x: x[0]
         )
-        return self._set_composite(valued_children, negate, aliases)
+        return self._set_composite(valued_children, negate, aliases, force_id)
 
     @staticmethod
     def _prop_algo(A: np.ndarray, F: np.ndarray, B: np.ndarray, forced: np.ndarray, max_iterations: int = 100):
