@@ -308,13 +308,18 @@ class PLDAG:
         # Flip the once that are negated
         M[self._nvec == 1] *= -1
 
+        # Find the lowest and highest bounds
+        lower_bound_min = (self._amat * ~bias_msk * self._dvec.real).sum(axis=1)
+        upper_bound_max = (self._amat * ~bias_msk * self._dvec.imag).sum(axis=1)
+        bound_limits = self._nvec * lower_bound_min + (1-self._nvec) * upper_bound_max
+
         # Fill the diagonal
-        np.fill_diagonal(M, -1*np.abs(M.sum(axis=1)))
+        np.fill_diagonal(M, -1*bound_limits)
 
         # Create the bias vector
         b_part_one = -1 * (self._dvec.real * bias_msk * self._amat).sum(axis=1)
         b_part_two = (self._nvec * -1) + ((1-self._nvec) * 1)
-        b = b_part_one * b_part_two - (self._amat * ~bias_msk).sum(axis=1)
+        b = b_part_one * b_part_two - bound_limits
 
         # Remove all zero rows
         zero_rows_mask = ~np.all(M == 0, axis=1)

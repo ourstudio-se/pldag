@@ -88,6 +88,17 @@ def test_test():
     result = model.test({"x": 0j, "y": 0j, "z": 0j}, "A")
     assert result.get("A") == 0j
 
+    model = PLDAG()
+    a = model.set_composite(["x","y"], -1, True)
+    result = model.test({"x": 1+1j})
+    assert result.get(a) == 1j
+
+    result = model.test({"x": 1+1j, "y": 0j})
+    assert result.get(a) == 1+1j
+
+    result = model.test({"x": 1+1j, "y": 1+1j})
+    assert result.get(a) == 0j
+
 def test_test_second():
     model = PLDAG() 
     model.set_primitives("xyz")
@@ -221,3 +232,14 @@ def test_polyhedron():
     A,b,vs = model.polyhedron(fix={"A": 2, "x": 2, "y": 0, "z": 0})
     assert np.array_equal(A, np.array([[1,1,1,-3], [1,0,0,1], [0,1,1,0]]))
     assert np.array_equal(b, np.array([-2, 4, 0]))
+
+    model = PLDAG()
+    model.set_primitive("a", -5+3j)
+    model.set_primitive("b", 2j)
+    model.set_primitive("c", -4+4j)
+    model.set_primitive("d", -4+5j)
+    # If A, then a+b+c+d <= 5
+    model.set_composite("abcd", -5, True, aliases=["A"])
+    A,b,vs = model.polyhedron()
+    assert np.array_equal(A, np.array([[-1,-1,-1,-1,13]]))
+    assert np.array_equal(b, np.array([8]))
