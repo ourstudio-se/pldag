@@ -9,15 +9,15 @@ def test_create_model():
 def test_propagate():
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atleast("xyz", 1, aliases=["A"])
+    model.set_atleast("xyz", 1, alias="A")
     model.propagate()
     assert np.array_equal(model.get("A"), np.array([complex(1j)]))
 
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atleast("x", 1, aliases=["C"])
-    model.set_atmost("yz", 1, aliases=["B"])
-    model.set_atleast("BC", 2, aliases=["A"])
+    model.set_atleast("x", 1, alias="C")
+    model.set_atmost("yz", 1, alias="B")
+    model.set_atleast("BC", 2, alias="A")
     model.propagate()
     assert np.array_equal(model.get("C"), np.array([1j]))
     assert np.array_equal(model.get("B"), np.array([1j]))
@@ -31,9 +31,9 @@ def test_propagate():
     
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atmost("x", 0, aliases=["C"])
-    model.set_atleast("xy", 1, aliases=["B"])
-    model.set_atleast("BC", 2, aliases=["A"])
+    model.set_atmost("x", 0, alias="C")
+    model.set_atleast("xy", 1, alias="B")
+    model.set_atleast("BC", 2, alias="A")
     model.propagate()
     assert np.array_equal(model.bounds, np.array([1j, 1j, 1j, 1j, 1j, 1j]))
     model.set_primitive("x", 1+1j)
@@ -45,7 +45,7 @@ def test_integer_bounds():
 
     model = PLDAG()
     model.set_primitives("z", complex(0, 10000))
-    model.set_atleast("z", 3000, aliases=["A"])
+    model.set_atleast("z", 3000, alias="A")
     model.propagate()
     assert np.array_equal(model.get("z"), np.array([complex(0, 10000)]))
     assert np.array_equal(model.get("A"), np.array([complex(0, 1)]))
@@ -57,23 +57,24 @@ def test_integer_bounds():
 def test_replace_composite():
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atleast("xyz", 1, aliases=["A"])
+    model.set_atleast("xyz", 1, alias="A")
     model.propagate()
     assert np.array_equal(model.get("A"), np.array([1j]))
-    model.set_atleast("xyz", 0, aliases=["A"])
+    model.set_atleast("xyz", 0, alias="A")
     model.propagate()
     assert np.array_equal(model.get("A"), np.array([1+1j]))
 
 def test_get():
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atleast("xyz", -1, aliases=["A"])
+    model.set_atleast("xyz", -1, alias="A")
     for alias, expected in zip(["x", "y", "z", "A"], np.array([[1j], [1j], [1j], [1j]])):
         assert np.array_equal(model.get(alias), expected)
 
 def test_test():
     model = PLDAG()
-    id = model.set_atleast("xyz", 1, aliases=["A"])
+    model.set_primitives("xyz")
+    id = model.set_atleast("xyz", 1, alias="A")
 
     assert model.test({"x": 1+1j}).get(id) == 1+1j
     assert model.test({"x": 1j}).get(id) == 1j
@@ -81,6 +82,7 @@ def test_test():
     assert model.test({"x": 0j, "y": 0j, "z": 0j}).get(id) == 0j
 
     model = PLDAG()
+    model.set_primitives("xyz")
     a = model.set_atmost(["x","y"], 1)
     assert model.test({"x": 1+1j}).get(a) == 1j
     assert model.test({"x": 1+1j, "y": 0j}).get(a) == 1+1j
@@ -89,9 +91,9 @@ def test_test():
 def test_test_second():
     model = PLDAG() 
     model.set_primitives("xyz")
-    model.set_atmost(["x"], 0, aliases=["C"])
-    model.set_atleast(["y", "z"], 2, aliases=["B"])
-    a = model.set_atleast(["B", "C"], 1, aliases=["A"])
+    model.set_atmost(["x"], 0, alias="C")
+    model.set_atleast(["y", "z"], 2, alias="B")
+    a = model.set_atleast(["B", "C"], 1, alias="A")
     assert model.test({
         "x": 1+1j, 
         "y": 1+1j, 
@@ -115,19 +117,19 @@ def test_test_second():
 def test_dependencies():
     model = PLDAG() 
     model.set_primitives("xyz")
-    model.set_atmost(["x"], 0, aliases=["C"])
-    model.set_atleast(["y", "z"], 2, aliases=["B"])
-    model.set_atleast(["B", "C"], 1, aliases=["A"])
+    model.set_atmost(["x"], 0, alias="C")
+    model.set_atleast(["y", "z"], 2, alias="B")
+    model.set_atleast(["B", "C"], 1, alias="A")
     assert list(chain(*model.dependencies("A").values())) == ["C", "B"]
-    assert list(chain(*model.dependencies("B").values())) == ["y", "z"]
-    assert list(chain(*model.dependencies("C").values())) == ["x"]
+    assert list(chain(*model.dependencies("B").keys())) == ["y", "z"]
+    assert list(chain(*model.dependencies("C").keys())) == ["x"]
 
 def test_negated():
     model = PLDAG() 
     model.set_primitives("xyz")
-    model.set_atmost(["x"], 1, aliases=["C"])
-    model.set_atmost(["y", "z"], 2, aliases=["B"])
-    model.set_atleast("xyz", 2, aliases=["A"])
+    model.set_atmost(["x"], 1, alias="C")
+    model.set_atmost(["y", "z"], 2, alias="B")
+    model.set_atleast("xyz", 2, alias="A")
     assert model.negated("A") == False
     assert model.negated("B") == True
     assert model.negated("C") == True
@@ -139,9 +141,9 @@ def test_negated():
 def test_delete():
     model = PLDAG() 
     model.set_primitives("xyz")
-    model.set_atmost(["x"], 0, aliases=["C"])
-    model.set_atmost(["y", "z"], 1, aliases=["B"])
-    model.set_atmost(["C", "B"], 2, aliases=["A"])
+    model.set_atmost(["x"], 0, alias="C")
+    model.set_atmost(["y", "z"], 1, alias="B")
+    model.set_atmost(["C", "B"], 2, alias="A")
     model.delete("x")
     model.propagate()
     # Since x is removed, C should be able to be true for ever
@@ -156,7 +158,7 @@ def test_delete():
 def test_cycle_detection():
     model = PLDAG() 
     model.set_primitives("xyz")
-    model.set_atleast("xyz", -1, aliases=["A"])
+    model.set_atleast("xyz", -1, alias="A")
     # There is no way using the set functions to create a cycle
     # So we need to modify the prime table
     # Here we set that "x" as "A" as input
@@ -176,13 +178,13 @@ def test_multiple_alias():
 
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atleast("xyz", 1, aliases=["A"])
-    model.set_atleast("xyz", 1, aliases=["B"])
+    model.set_atleast("xyz", 1, alias="A")
+    model.set_atleast("xyz", 1, alias="B")
     model.propagate()
     assert np.array_equal(model.get("A"), np.array([1j]))
     assert np.array_equal(model.get("B"), np.array([1j]))
 
-    model.set_atleast(["A", "B"], -1, aliases=["C"])
+    model.set_atleast(["A", "B"], -1, alias="C")
     dependencies = model.dependencies("C")
     assert dependencies[model._amap["A"]] == dependencies[model._amap["B"]]
 
@@ -195,8 +197,8 @@ def test_to_polyhedron():
     model.set_primitive("d", -4+5j)
     model.set_primitive("e", 1j)
     model.set_atleast("be", 3)
-    model.set_atleast("abcd", -9, aliases=["A"])
-    model.set_atmost("abcd", 5, aliases=["B"])
+    model.set_atleast("abcd", -9, alias="A")
+    model.set_atmost("abcd", 5, alias="B")
     A,b,vs = model.to_polyhedron()
     assert np.array_equal(A, np.array([
         [  0,   1,   0,   0,   1,  -3,   0,   0],
@@ -228,7 +230,7 @@ def test_to_polyhedron():
 
     model = PLDAG()
     model.set_primitives("xyz")
-    model.set_atleast("xyz", 1, aliases=["A"])
+    model.set_atleast("xyz", 1, alias="A")
     A,b,vs = model.to_polyhedron()
     assert np.array_equal(A, np.array([[1,1,1,-1]]))
     assert np.array_equal(b, np.array([ 0]))
@@ -270,6 +272,7 @@ def test_logical_operators():
     assert model.test({"x": 0j, "y": 0j, "z": 0j}).get(id) == 1+1j
 
     model = PLDAG()
+    model.set_primitives("xy")
     id = model.set_imply("x", "y")
     assert model.test({"x": 1j, "y": 1j}).get(id) == 1j
     assert model.test({"x": 1j, "y": 1+1j}).get(id) == 1+1j
@@ -278,6 +281,7 @@ def test_logical_operators():
     assert model.test({"x": 0j, "y": 1+1j}).get(id) == 1+1j
 
     model = PLDAG()
+    model.set_primitives("xy")
     id = model.set_xor("xy")
     assert model.test({"x": 1j, "y": 1j}).get(id) == 1j
     assert model.test({"x": 1j, "y": 1+1j}).get(id) == 1j

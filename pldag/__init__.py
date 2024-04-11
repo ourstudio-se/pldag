@@ -75,6 +75,10 @@ class PLDAG:
         """Get the bounds of the given alias"""
         return self._dvec[list(map(self._icalias, alias))]
     
+    def exists(self, alias: str) -> bool:
+        """Check if the given alias exists"""
+        return (alias in self._amap) or (alias in self._imap)
+    
     def dependencies(self, alias: str) -> Dict[str, Set[str]]:
         """
             Get the dependencies of the given alias or ID.
@@ -83,7 +87,7 @@ class PLDAG:
         """
         return dict(
             map(
-                lambda x: (x, self._rev_amap[x]),
+                lambda x: (x, self._rev_amap.get(x, set())),
                 map(
                     lambda x: list(self._imap)[x],
                     np.argwhere(self._amat[self._iralias(alias)] == 1).T[0]
@@ -106,7 +110,7 @@ class PLDAG:
     
     def set_primitive(self, alias: str, bound: complex = complex(0,1)) -> str:
         """Add a primitive prime factor matrix"""
-        if alias in self._amap:
+        if alias in self._imap:
             # Update value if already in map
             self._dvec[self._icalias(alias)] = bound
         else:
@@ -114,7 +118,6 @@ class PLDAG:
             self._dvec = np.append(self._dvec, bound)
             self._cvec = np.append(self._cvec, False)
             self._imap[alias] = self._amat.shape[1] - 1
-            self._amap[alias] = alias
 
         return alias
 
@@ -124,14 +127,10 @@ class PLDAG:
             self.set_primitive(alias, bound)
         return aliases
 
-    def _set_gelineq(self, children: list, bias: int, negate: bool = False, aliases: List[str] = [], force_id: Optional[str] = None) -> str:
+    def _set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None, force_id: Optional[str] = None) -> str:
         """
             Add a composite constraint of at least `value`.
         """
-        for child_alias in children:
-            if child_alias not in self._imap:
-                self.set_primitive(child_alias)
-
         _bias = complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2))
         _id = sha1(("".join(sorted(children)) + str(negate)).encode()).hexdigest() if force_id is None else force_id
         if _id in self._imap:
@@ -153,16 +152,10 @@ class PLDAG:
             self._cvec = np.append(self._cvec, True)
             self._imap[_id] = self._amat.shape[1] - 1
         
-        for alias in aliases:
+        if alias is not None:
             self._amap[alias] = _id
 
         return _id
-    
-    def set_atleast(self, children: list, value: int, aliases: List[str] = [], force_id: Optional[str] = None) -> str:
-        return self._set_gelineq(children, -1 * value, False, aliases, force_id)
-    
-    def set_atmost(self, children: list, value: int, aliases: List[str] = [], force_id: Optional[str] = None) -> str:
-        return self._set_gelineq(children, -1 * (value + 1), True, aliases, force_id)
     
     @staticmethod
     def _prop_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, forced: np.ndarray, max_iterations: int = 100):
@@ -248,29 +241,35 @@ class PLDAG:
         """
         return dict(zip(self._imap.keys(), self._test(query)))
     
-    def set_or(self, references: List[str], aliases: List[str] = []) -> str:
-        return self.set_atleast(references, 1, aliases=aliases)
+    def set_atleast(self, children: list, value: int, alias: Optional[str] = None, force_id: Optional[str] = None) -> str:
+        return self._set_gelineq(children, -1 * value, False, alias, force_id)
     
-    def set_and(self, references: List[str], aliases: List[str] = []) -> str:
-        return self.set_atleast(references, len(references), aliases=aliases)
+    def set_atmost(self, children: list, value: int, alias: Optional[str] = None, force_id: Optional[str] = None) -> str:
+        return self._set_gelineq(children, -1 * (value + 1), True, alias, force_id)
     
-    def set_not(self, references: List[str], aliases: List[str] = []) -> str:
-        return self.set_atmost(references, 0, aliases=aliases)
+    def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
+        return self.set_atleast(references, 1, alias=alias)
     
-    def set_xor(self, references: List[str], aliases: List[str] = []) -> str:
+    def set_and(self, references: List[str], alias: Optional[str] = None) -> str:
+        return self.set_atleast(references, len(references), alias=alias)
+    
+    def set_not(self, references: List[str], alias: Optional[str] = None) -> str:
+        return self.set_atmost(references, 0, alias=alias)
+    
+    def set_xor(self, references: List[str], alias: Optional[str] = None) -> str:
         return self.set_and([
             self.set_atleast(references, 1),
             self.set_atmost(references, 1),
-        ], aliases=aliases)
+        ], alias=alias)
     
-    def set_imply(self, condition: str, consequence: str, aliases: List[str] = []) -> str:
-        return self.set_or([self.set_not([condition]), consequence], aliases=aliases)
+    def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None) -> str:
+        return self.set_or([self.set_not([condition]), consequence], alias=alias)
 
     def to_polyhedron(self, fix: dict = {}) -> tuple:
 
         """
             Returns a polyhedron of a tuple (A, b, variables) representation of the PL-DAG.
-            The variables list consists of tuples of (ID, set of aliases, bound as complex number).
+            The variables list consists of tuples of (ID, alias, bound as complex number).
 
             fix: dict of aliases to fix in the polyhedron. E.g. {"A": 1, "B": 0} fix A=1 and B=0.
         """
@@ -328,7 +327,7 @@ class PLDAG:
                 map(
                     lambda i: (
                         rimap[i],
-                        self._rev_amap.get(rimap[i], rimap[i]),
+                        self._rev_amap.get(rimap[i], {}),
                         self._dvec[i],
                     ),
                     np.array(list(self._imap.values()))
