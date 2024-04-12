@@ -2,7 +2,7 @@ import numpy as np
 from hashlib import sha1
 from itertools import groupby, repeat
 from functools import partial
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set
 from graphlib import TopologicalSorter
 
 class PLDAG:
@@ -73,48 +73,6 @@ class PLDAG:
         """
         return self._icol(id) - (~self._cvec).sum()
     
-    def get(self, *id: str) -> np.ndarray:
-        """Get the bounds of the given ID(s)"""
-        return self._dvec[list(map(self._icol, id))]
-    
-    def exists(self, id: str) -> bool:
-        """Check if the given id exists"""
-        return (id in self._imap)
-    
-    def dependencies(self, id: str) -> Set[str]:
-        """
-            Get the dependencies of the given ID.
-        """
-        return set(
-            map(
-                lambda x: list(self._imap)[x],
-                np.argwhere(self._amat[self._irow(id)] == 1).T[0]
-            )
-        )
-    
-    def negated(self, id: str) -> bool:
-        """Get the negated state of the given id"""
-        return bool(self._nvec[self._irow(id)])
-    
-    def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
-        """Add a primitive prime factor matrix"""
-        if id in self._imap:
-            # Update value if already in map
-            self._dvec[self._icol(id)] = bound
-        else:
-            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.uint8)))
-            self._dvec = np.append(self._dvec, bound)
-            self._cvec = np.append(self._cvec, False)
-            self._imap[id] = self._amat.shape[1] - 1
-
-        return id
-
-    def set_primitives(self, ids: List[str], bound: complex = complex(0,1)) -> List[str]:
-        """Add multiple primitive prime factor matrices"""
-        for id in ids:
-            self.set_primitive(id, bound)
-        return ids
-
     def _set_gelineq(self, children: list, bias: int, negate: bool = False) -> str:
         """
             Add a composite constraint of at least `value`.
@@ -166,10 +124,51 @@ class PLDAG:
             previous_D = new_D
         
         raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
+    
+    def get(self, *id: str) -> np.ndarray:
+        """Get the bounds of the given ID(s)"""
+        return self._dvec[list(map(self._icol, id))]
+    
+    def exists(self, id: str) -> bool:
+        """Check if the given id exists"""
+        return (id in self._imap)
+    
+    def dependencies(self, id: str) -> Set[str]:
+        """
+            Get the dependencies of the given ID.
+        """
+        return set(
+            map(
+                lambda x: list(self._imap)[x],
+                np.argwhere(self._amat[self._irow(id)] == 1).T[0]
+            )
+        )
+    
+    def negated(self, id: str) -> bool:
+        """Get the negated state of the given id"""
+        return bool(self._nvec[self._irow(id)])
 
     def propagate(self):
         """
-            Propagates the graph, stores and returns the propagated bounds.
+            Propagates the graph and stores the propagated bounds.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_atleast("xy", 1)
+            >>> model.propagate()
+            >>> model.get(a)
+            1j
+            
+            >>> model.set_primitive("x", 1+1j)
+            >>> model.propagate()
+            >>> model.get(a)
+            1+1j
+
+            Returns
+            -------
+            None
         """
         A: np.ndarray = self._amat
         B: np.ndarray = self._bvec
@@ -183,11 +182,25 @@ class PLDAG:
     def test(self, query: Dict[str, complex]) -> Dict[str, complex]:
 
         """
-            Propagates the graph and returns the selected result.
+            Propagates the graph and returns the result.
 
-            query:  what nodes and their bound to start propagating from
+            Parameters
+            ----------
+            query : Dict[str, complex]
+                The query to test.
 
-            Returns the selected propagated bounds.
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_atleast("xy", 1)
+            >>> model.test({"x": 1j, "y": 1+1j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            Dict[str, complex]
+                The result of the query.
         """
         A: np.ndarray = self._amat
         B: np.ndarray = self._bvec
@@ -204,37 +217,283 @@ class PLDAG:
 
         return dict(zip(self._imap.keys(), self._prop_algo(A, B, C, D, F, qprimes)))
     
-    def set_atleast(self, children: list, value: int) -> str:
-        return self._set_gelineq(children, -1 * value, False)
+    def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
+        """
+            Add a primitive variable.
+
+            Parameters
+            ----------
+            id : str
+                The ID of the primitive variable.
+
+            bound : complex
+                The bound of the primitive variable.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitive("x")
+            >>> model.get("x")
+            1j
+
+            >>> model.set_primitive("x", 1+1j)
+            >>> model.get("x")
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the primitive variable.
+        """
+        if id in self._imap:
+            # Update value if already in map
+            self._dvec[self._icol(id)] = bound
+        else:
+            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.uint8)))
+            self._dvec = np.append(self._dvec, bound)
+            self._cvec = np.append(self._cvec, False)
+            self._imap[id] = self._amat.shape[1] - 1
+
+        return id
+
+    def set_primitives(self, ids: List[str], bound: complex = complex(0,1)) -> List[str]:
+        """
+            Add multiple primitive variables.
+
+            Parameters
+            ----------
+            ids : List[str]
+                The IDs of the primitive variables.
+
+            bound : complex
+                The bound of all given primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives(["x", "y"])
+            >>> model.get("x")
+            1j
+
+            >>> model.get("y")
+            1j
+
+            Returns
+            -------
+            List[str]
+                The IDs of the primitive variables.
+        """
+        for id in ids:
+            self.set_primitive(id, bound)
+        return ids
     
-    def set_atmost(self, children: list, value: int) -> str:
-        return self._set_gelineq(children, -1 * (value + 1), True)
+    def set_atleast(self, references: List[str], value: int) -> str:
+        """
+            Add a composite constraint of at least `value`.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            value : int
+                The minimum value to set.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_atleast(["x", "y"], 1)
+            >>> model.test({"x": 1+1j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self._set_gelineq(references, -1 * value, False)
+    
+    def set_atmost(self, references: List[str], value: int) -> str:
+        """
+            Add a composite constraint of at most `value`.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            value : int
+                The maximum value to set.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_atmost(["x", "y"], 1)
+            >>> model.test({"x": 1+1j, "y": 0j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self._set_gelineq(references, -1 * (value + 1), True)
     
     def set_or(self, references: List[str]) -> str:
+        """
+            Add a composite constraint of an OR operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_or(["x", "y"])
+            >>> model.test({"x": 1+1j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
         return self.set_atleast(references, 1)
     
     def set_and(self, references: List[str]) -> str:
+        """
+            Add a composite constraint of an AND operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_and(["x", "y"])
+            >>> model.test({"x": 1+1j, "y": 1+1j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
         return self.set_atleast(references, len(references))
     
     def set_not(self, references: List[str]) -> str:
+        """
+            Add a composite constraint of a NOT operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_not(["x"])
+            >>> model.test({"x": 1+1j}).get(a)
+            0j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
         return self.set_atmost(references, 0)
     
     def set_xor(self, references: List[str]) -> str:
+        """
+            Add a composite constraint of an XOR operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_xor(["x", "y"])
+            >>> model.test({"x": 1+1j, "y": 0j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
         return self.set_and([
             self.set_atleast(references, 1),
             self.set_atmost(references, 1),
         ])
     
     def set_imply(self, condition: str, consequence: str) -> str:
+        """
+            Add a composite constraint of an IMPLY operation.
+
+            Parameters
+            ----------
+            condition : str
+                The reference to the condition.
+
+            consequence : str
+                The reference to the consequence.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_imply("x", "y")
+            >>> model.test({"x": 1j, "y": 1j}).get(a)
+            1j
+
+            >>> model.test({"x": 1+1j, "y": 0j}).get(a)
+            0j
+
+            >>> model.test({"x": 0j, "y": 0j}).get(a)
+            1+1j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
         return self.set_or([self.set_not([condition]), consequence])
 
-    def to_polyhedron(self, fix: dict = {}) -> tuple:
+    def to_polyhedron(self, fix: Dict[str, int] = {}) -> tuple:
 
         """
-            Returns a polyhedron of a tuple (A, b, variables) representation of the PL-DAG.
-            The variables list consists of tuples of (ID, bound as complex number).
+            Constructs a polyhedron of matrix A and bias vector b,
+            such that A.dot(x) >= b, where x is the vector of variables.
+            Every composite variable A is its own column in the matrix where
+            A -> (A's composite proposition) is true. 
 
-            fix: dict of ids to fix in the polyhedron. E.g. {"A": 1, "B": 0} fix A=1 and B=0.
+            Parameters
+            ----------
+            fix : Dict[str, int]
+                A dictionary of variables to fix.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> a = model.set_atleast("xyz", 1)
+            >>> A,b,vs = model.to_polyhedron()
+            >>> np.array_equal(A, np.array([[1,1,1,-1]]))
+            True
         """
 
         # Create the matrix
