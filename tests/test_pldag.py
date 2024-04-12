@@ -1,6 +1,24 @@
 import numpy as np
 from pldag import PLDAG
-from itertools import chain
+from hypothesis import given, strategies, assume, settings
+
+def composite_proposition_strategy():
+    """
+        Returns a strategy of all necessary components of a composite proposition.
+        First element is the children, second bias and third if negated or not.
+    """
+    return strategies.tuples(
+        strategies.sets(strategies.text(), min_size=1, max_size=5),
+        strategies.integers(min_value=1, max_value=5),
+        strategies.booleans(),
+    )
+
+@given(composite_proposition_strategy(), composite_proposition_strategy())
+def test_id_generation(comp1, comp2):
+    # Check if the comp1 and comp2 are the same,
+    # the id should be the same.
+    # (comp1 == comp2) <=> (id(comp1) == id(comp2))
+    assert (comp1 == comp2) == (PLDAG._composite_id(*comp1) == PLDAG._composite_id(*comp2))
 
 def test_create_model():
     model = PLDAG()

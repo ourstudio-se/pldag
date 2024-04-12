@@ -49,6 +49,13 @@ class PLDAG:
             )
         ).static_order()
     
+    @staticmethod
+    def _composite_id(children: list, bias: int, negate: bool = False) -> str:
+        """
+            Create a composite ID from a list of children.
+        """
+        return sha1(("".join(sorted(set(children))) + str(negate) + str(bias)).encode()).hexdigest()
+    
     def _icol(self, id: str) -> int:
         """
             Returns the column index of the given ID.
@@ -117,7 +124,7 @@ class PLDAG:
             Add a composite constraint of at least `value`.
         """
         _bias = complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2))
-        _id = sha1(("".join(sorted(children)) + str(negate)).encode()).hexdigest()
+        _id = self._composite_id(children, bias, negate)
         if _id in self._imap:
             arr = np.zeros(self._amat.shape[1], dtype=np.int8)
             arr[[self._imap[child] for child in children]] = 1
