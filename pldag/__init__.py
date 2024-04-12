@@ -56,6 +56,11 @@ class PLDAG:
         """
         return sha1(("".join(sorted(set(children))) + str(negate) + str(bias)).encode()).hexdigest()
     
+    @property
+    def _revimap(self) -> dict:
+        """Get the reverse map"""
+        return dict(map(lambda x: (x[1], x[0]), self._imap.items()))
+    
     def _icol(self, id: str) -> int:
         """
             Returns the column index of the given ID.
@@ -91,15 +96,6 @@ class PLDAG:
         """Get the negated state of the given id"""
         return bool(self._nvec[self._irow(id)])
     
-    def delete(self, id: str) -> None:
-        """Delete the given id"""
-        idx = self._icol(id)
-
-        # Remove the primitive prime for all composite primes
-        # May be changed later. Now we just set everything to 0
-        # but keep the rows and columns
-        self._amat[:, idx] = 0
-    
     def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
         """Add a primitive prime factor matrix"""
         if id in self._imap:
@@ -123,23 +119,12 @@ class PLDAG:
         """
             Add a composite constraint of at least `value`.
         """
-        _bias = complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2))
         _id = self._composite_id(children, bias, negate)
-        if _id in self._imap:
-            arr = np.zeros(self._amat.shape[1], dtype=np.int8)
-            arr[[self._imap[child] for child in children]] = 1
-            self._amat[self._irow(_id)] = arr
-            self._bvec[self._irow(_id)] = _bias
-            self._nvec[self._irow(_id)] = negate
-            self._dvec[self._imap[_id]] = complex(0, 1)
-            self._cvec[self._imap[_id]] = True
-        else:
+        if not _id in self._imap:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            arr = np.zeros(self._amat.shape[1], dtype=np.int8)
-            arr[[self._icol(child) for child in children]] = 1
-            self._amat[self._amat.shape[0] - 1] = arr
+            self._amat[-1, [self._icol(child) for child in children]] = 1
             self._dvec = np.append(self._dvec, complex(0, 1))
-            self._bvec = np.append(self._bvec, _bias)
+            self._bvec = np.append(self._bvec, complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2)))
             self._nvec = np.append(self._nvec, negate)
             self._cvec = np.append(self._cvec, True)
             self._imap[_id] = self._amat.shape[1] - 1

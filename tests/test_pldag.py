@@ -156,23 +156,6 @@ def test_negated():
     assert np.array_equal(model.get(b), np.array([1j]))
     assert np.array_equal(model.get(c), np.array([1j]))
 
-def test_delete():
-    model = PLDAG() 
-    model.set_primitives("xyz")
-    c=model.set_atmost(["x"], 0)
-    b=model.set_atmost(["y", "z"], 1)
-    a=model.set_atmost([c, b], 2)
-    model.delete("x")
-    model.propagate()
-    # Since x is removed, C should be able to be true for ever
-    # Same as C = 0 >= 0
-    np.array_equal(model.get(c), np.array([1+1j]))
-    # A and B should stay the same
-    np.array_equal(model.get(b), np.array([1j]))
-    np.array_equal(model.get(a), np.array([1+1j]))
-    model.delete("y")
-    model.propagate()
-
 def test_cycle_detection():
     model = PLDAG() 
     model.set_primitives("xyz")
