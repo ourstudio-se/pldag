@@ -69,21 +69,49 @@ class PLDAG:
         return sha1(("".join(sorted(set(children))) + str(negate) + str(bias)).encode()).hexdigest()
     
     @property
+    def primitives(self) -> np.ndarray:
+        return self._col_vars[~self._cvec]
+    
+    @property
+    def composites(self) -> np.ndarray:
+        return self._col_vars[self._cvec]
+    
+    @property
     def _revimap(self) -> dict:
         """Get the reverse map"""
         return dict(map(lambda x: (x[1], x[0]), self._imap.items()))
     
-    def _icol(self, id: str) -> int:
+    @property
+    def _col_vars(self) -> np.ndarray:
+        return np.array(list(self._imap.keys()))
+    
+    @property
+    def _row_vars(self) -> np.ndarray:
+        return np.array(list(self._imap.keys()))[self._cvec]
+    
+    def _icol(self, i: int) -> str:
+        """
+            Returns the ID of the given column index.
+        """
+        return self._col_vars[i]
+    
+    def _irow(self, i: int) -> str:
+        """
+            Returns the ID of the given row index.
+        """
+        return self._row_vars[i]
+    
+    def _col(self, id: str) -> int:
         """
             Returns the column index of the given ID.
         """
         return self._imap[id]
     
-    def _irow(self, id: str) -> int:
+    def _row(self, id: str) -> int:
         """
             Returns the row index of the given ID.
         """
-        return self._icol(id) - (~self._cvec).sum()
+        return self._col(id) - (~self._cvec).sum()
     
     def _set_gelineq(self, children: list, bias: int, negate: bool = False) -> str:
         """
@@ -92,7 +120,7 @@ class PLDAG:
         _id = self._composite_id(children, bias, negate)
         if not _id in self._imap:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            self._amat[-1, [self._icol(child) for child in children]] = 1
+            self._amat[-1, [self._col(child) for child in children]] = 1
             self._dvec = np.append(self._dvec, complex(0, 1))
             self._bvec = np.append(self._bvec, complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2)))
             self._nvec = np.append(self._nvec, negate)
@@ -139,7 +167,7 @@ class PLDAG:
     
     def get(self, *id: str) -> np.ndarray:
         """Get the bounds of the given ID(s)"""
-        return self._dvec[list(map(self._icol, id))]
+        return self._dvec[list(map(self._col, id))]
     
     def exists(self, id: str) -> bool:
         """Check if the given id exists"""
@@ -152,13 +180,13 @@ class PLDAG:
         return set(
             map(
                 lambda x: list(self._imap)[x],
-                np.argwhere(self._amat[self._irow(id)] == 1).T[0]
+                np.argwhere(self._amat[self._row(id)] == 1).T[0]
             )
         )
     
     def negated(self, id: str) -> bool:
         """Get the negated state of the given id"""
-        return bool(self._nvec[self._irow(id)])
+        return bool(self._nvec[self._row(id)])
 
     def propagate(self):
         """
@@ -191,7 +219,7 @@ class PLDAG:
         # Propagate the graph and store the result as new bounds
         self._dvec = self._prop_algo(A, B, C, D, F, np.zeros(D.shape[0], dtype=bool))
 
-    def test(self, query: Dict[str, complex]) -> Dict[str, complex]:
+    def test(self, query: Dict[str, complex], freeze: bool = True) -> Dict[str, complex]:
 
         """
             Propagates the graph and returns the result.
@@ -200,6 +228,10 @@ class PLDAG:
             ----------
             query : Dict[str, complex]
                 The query to test.
+
+            freeze : bool = True
+                If the bounds given in query should be changeable
+                during propagation.
 
             Examples
             --------
@@ -225,7 +257,7 @@ class PLDAG:
 
         # Query translation into primes
         qprimes = np.zeros(D.shape[0], dtype=bool)
-        qprimes[[self._imap[q] for q in query]] = True
+        qprimes[[self._imap[q] for q in query]] = True and freeze
 
         # Replace the observed bounds
         D[[self._imap[q] for q in query]] = np.array(list(query.values()))
@@ -262,7 +294,7 @@ class PLDAG:
         """
         if id in self._imap:
             # Update value if already in map
-            self._dvec[self._icol(id)] = bound
+            self._dvec[self._col(id)] = bound
         else:
             self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.uint8)))
             self._dvec = np.append(self._dvec, bound)
@@ -546,7 +578,7 @@ class PLDAG:
         for i, vs in groupby(zip(fix.values(), fix.keys()), key=lambda x: x[0]):
             v = list(map(lambda x: x[1], vs))
             a = np.zeros(A.shape[1], dtype=np.int64)
-            a[np.array(list(map(self._icol, v)))] = 1
+            a[np.array(list(map(self._col, v)))] = 1
             if i > 0 or i < 0:
                 _b = a.sum() * i
             else:
@@ -572,6 +604,85 @@ class PLDAG:
         )
 
         return A, b, variables
+    
+    def _from_indices(self, row_idxs: np.ndarray, col_idxs: np.ndarray) -> 'PLDAG':
+        """
+            Create a PLDAG from the given row and column indices.
+
+            Parameters
+            ----------
+            row_idxs : np.ndarray
+                The row indices to include in the sub PLDAG.
+
+            col_idxs : np.ndarray
+                The column indices to include in the sub PLDAG.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> a = model.set_atleast("xyz", 1)
+            >>> sub_model = model._from_indices(np.array([0, 1]), np.array([0, 1, 2]))
+            >>> sub_model.get("x")
+            1j
+
+            Returns
+            -------
+            PLDAG
+                The sub-PLDAG.
+        """
+        sub_model = PLDAG()
+        sub_model._amat = self._amat[row_idxs][:, col_idxs]
+        sub_model._nvec = self._nvec[row_idxs]
+        sub_model._dvec = self._dvec[col_idxs]
+        sub_model._bvec = self._bvec[row_idxs]
+        sub_model._cvec = self._cvec[col_idxs]
+        sub_model._imap = dict(map(lambda x: (x[1], x[0]), enumerate(self._col_vars[col_idxs])))
+        return sub_model
+    
+    def sub(self, ids: List[str]) -> 'PLDAG':
+        """
+            Create a sub-PLDAG from the given IDs.
+
+            Parameters
+            ----------
+            ids : List[str]
+                The IDs to include in the sub PLDAG.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> a = model.set_atleast("xyz", 1)
+            >>> sub_model = model.sub_pldag(["x", "y"])
+            >>> sub_model.get("x")
+            1j
+
+            Returns
+            -------
+            PLDAG
+                The sub-PLDAG.
+        """
+
+        col_vars = self._col_vars.tolist()
+        row_vars = self._row_vars.tolist()
+
+        def incoming_edges(idlist: List[int]) -> Set[int]:
+            return set(self._col_vars[np.argwhere(self._amat[list(map(row_vars.index, filter(lambda v: v in row_vars, idlist)))]).T[1]].tolist())
+        
+        # First find all variables (columns and rows)
+        # that eventually reaches any of the id's in `ids`
+        max_iterations: int = 100
+        matching_variables = incoming_edges(set(ids)).union(set(ids))
+        for _ in range(max_iterations):
+            new_matching_variables = incoming_edges(matching_variables)
+            if new_matching_variables.issubset(matching_variables):
+                break
+            matching_variables.update(new_matching_variables)
+
+        col_idxs = np.array(sorted(list(map(col_vars.index, matching_variables))))
+        row_idxs = np.array(sorted(list(map(row_vars.index, filter(lambda v: v in self._row_vars, matching_variables)))))
+        return self._from_indices(row_idxs, col_idxs)
     
     def solve(self, objectives: List[Dict[str, int]], fix: Dict[str, int], solver: Solver) -> List[Dict[str, int]]:
         """
@@ -605,11 +716,11 @@ class PLDAG:
         A, b, variables = self.to_polyhedron(fix)
         obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
         for i, obj in enumerate(objectives):
-            obj_mat[i, [self._icol(k) for k in obj]] = list(obj.values())
+            obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
 
         if solver == Solver.GLPK:
             from pldag.solver.glpk_solver import solve_lp
-            solutions = solve_lp(A, b, obj_mat)
+            solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
         else:
             raise ValueError("Solver not implemented.")
         

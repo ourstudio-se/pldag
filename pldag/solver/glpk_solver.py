@@ -2,7 +2,7 @@ import numpy as np
 import npycvx
 import functools
 
-def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray):
+def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=set()):
     """
     Solve the linear programming problem:
     minimize c^T x
@@ -15,7 +15,7 @@ def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray):
     # matrices/vectors into cvxopt data type...
     solve_part_fn = functools.partial(
         npycvx.solve_lp, 
-        *npycvx.convert_numpy(A, b), 
+        *npycvx.convert_numpy(A, b, int_vrs=int_vrs), 
         False
     )
 

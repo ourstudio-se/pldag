@@ -309,3 +309,19 @@ def test_logical_operators():
     assert model.test({"x": 1+1j, "y": 0j}).get(id) == 1+1j
     assert model.test({"x": 0j, "y": 1j}).get(id) == 1j
     assert model.test({"x": 0j, "y": 1+1j}).get(id) == 1+1j
+
+def test_sub():
+    model = PLDAG()
+    model.set_primitives(["m1","m2","c1","c2","e1","e2","e3","g1","g2"])
+    sub_id = model.set_and([
+        model.set_xor(["m1","m2"]),
+        model.set_xor(["c1","c2"]),
+        model.set_xor(["e1","e2","e3"]),
+        model.set_imply("m1", model.set_or(["e1", "e2"])),
+        model.set_imply("m2", model.set_or(["e1", "e3"])),
+        model.set_imply(model.set_or(["e1", "e2"]), "g1"),
+        model.set_imply("e3", "g2"),
+    ])
+    not_included = [model.set_and(["m1", "e1"]), model.set_and(["m2", "e2"])]
+    sub_model = model.sub([sub_id])
+    assert all(map(lambda id: id not in sub_model._imap, not_included))
