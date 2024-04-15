@@ -13,6 +13,17 @@ def composite_proposition_strategy():
         strategies.booleans(),
     )
 
+def composite_proposition_strategies():
+    return strategies.lists(composite_proposition_strategy(), min_size=1, max_size=10)
+
+@given(composite_proposition_strategies())
+def model_strategy(composites):
+    model = PLDAG()
+    for children, bias, negated in composites:
+        model.set_primitives(children)
+        model.set_atleast(children, bias, negated)
+    return model
+
 @given(composite_proposition_strategy(), composite_proposition_strategy())
 def test_id_generation(comp1, comp2):
     # Check if the comp1 and comp2 are the same,
@@ -105,6 +116,14 @@ def test_test():
     assert model.test({"x": 1+1j}).get(a) == 1j
     assert model.test({"x": 1+1j, "y": 0j}).get(a) == 1+1j
     assert model.test({"x": 1+1j, "y": 1+1j}).get(a) == 0j
+
+    model = PLDAG()
+    model.set_primitives("xy")
+    a = model.set_and(["x"])
+    b = model.set_not(["y"])
+    c = model.set_and([a, b])
+    assert model.test({"x": 1+1j, "y": 0j}).get(c) == 1+1j
+    assert model.test({"y": 0j, "x": 1+1j}).get(c) == 1+1j
 
 def test_test_second():
     model = PLDAG() 

@@ -5,6 +5,18 @@ from functools import partial
 from typing import Dict, List, Set
 from graphlib import TopologicalSorter
 
+from enum import Enum
+from importlib import import_module
+
+class Solver(Enum):
+    GLPK = "glpk"
+
+# Add more solvers here as they are implemented
+try:
+    import_module('pldag.solver.glpk_solver')
+except ImportError:
+    Solver.GLPK = None
+
 class PLDAG:
 
     """
@@ -208,12 +220,15 @@ class PLDAG:
         D: np.ndarray = self._dvec.copy()
         F: np.ndarray = self._nvec
 
+        # Filter query based on existing variables
+        query = {k: v for k, v in query.items() if k in self._imap}
+
         # Query translation into primes
         qprimes = np.zeros(D.shape[0], dtype=bool)
         qprimes[[self._imap[q] for q in query]] = True
 
         # Replace the observed bounds
-        D[qprimes] = np.array(list(query.values()))
+        D[[self._imap[q] for q in query]] = np.array(list(query.values()))
 
         return dict(zip(self._imap.keys(), self._prop_algo(A, B, C, D, F, qprimes)))
     
@@ -557,3 +572,58 @@ class PLDAG:
         )
 
         return A, b, variables
+    
+    def solve(self, objectives: List[Dict[str, int]], fix: Dict[str, int], solver: Solver) -> List[Dict[str, int]]:
+        """
+            Solve the polyhedron with the given objectives.
+
+            Parameters
+            ----------
+            objectives : List[Dict[str, int]]
+                The objectives to solve for.
+
+            fix : Dict[str, int]
+                The variables to fix.
+
+            solver : Solver
+                The solver to use.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> a = model.set_atleast("xyz", 1)
+            >>> A,b,vs = model.to_polyhedron()
+            >>> model.solve([{"x": 0, "y": 1, "z": 0}], Solver.GLPK)
+            [{'x': 0, 'y': 1, 'z': 0}]
+
+            Returns
+            -------
+            List[Dict[str, int]]
+                The solutions for the objectives.
+        """
+        A, b, variables = self.to_polyhedron(fix)
+        obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
+        for i, obj in enumerate(objectives):
+            obj_mat[i, [self._icol(k) for k in obj]] = list(obj.values())
+
+        if solver == Solver.GLPK:
+            from pldag.solver.glpk_solver import solve_lp
+            solutions = solve_lp(A, b, obj_mat)
+        else:
+            raise ValueError("Solver not implemented.")
+        
+        return list(
+            map(
+                lambda solution: dict(
+                    zip(
+                        variables.T[0], 
+                        map(
+                            lambda i: complex(i,i),
+                            solution
+                        )
+                    )
+                ),
+                solutions
+            )
+        )
