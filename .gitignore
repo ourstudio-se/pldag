@@ -25,6 +25,7 @@ pip-log.txt
 
 /test.py
 /test_*.*
+test.ipynb
 
 /setup.cfg
 MANIFEST.in

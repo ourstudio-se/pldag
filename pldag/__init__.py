@@ -1,7 +1,7 @@
 import numpy as np
 from hashlib import sha1
 from itertools import groupby, repeat
-from functools import partial
+from functools import partial, lru_cache
 from typing import Dict, List, Set
 from graphlib import TopologicalSorter
 
@@ -40,6 +40,12 @@ class PLDAG:
         # Maps id's to index
         self._imap = {}
 
+    def __hash__(self) -> int:
+        return hash(self.sha1())
+    
+    def sha1(self) -> str:
+        return sha1("".join(self._imap.keys()).encode()).hexdigest()
+
     @property
     def bounds(self) -> np.ndarray:
         """Get the bounds of all aliases"""
@@ -75,6 +81,19 @@ class PLDAG:
     @property
     def composites(self) -> np.ndarray:
         return self._col_vars[self._cvec]
+    
+    @property
+    def columns(self) -> np.ndarray:
+        return self._col_vars
+    
+    @property
+    def rows(self) -> np.ndarray:
+        return self.composites
+    
+    @property
+    def adjacency_matrix(self) -> np.ndarray:
+        """Get the adjacency matrix"""
+        return np.vstack((np.zeros((self._amat.shape[1]-self._amat.shape[0], self._amat.shape[1])), self._amat))
     
     @property
     def _revimap(self) -> dict:
@@ -520,7 +539,8 @@ class PLDAG:
         """
         return self.set_or([self.set_not([condition]), consequence])
 
-    def to_polyhedron(self, fix: Dict[str, int] = {}) -> tuple:
+    @lru_cache
+    def to_polyhedron(self, **fix) -> tuple:
 
         """
             Constructs a polyhedron of matrix A and bias vector b,
@@ -586,6 +606,25 @@ class PLDAG:
 
             A = np.vstack([A, a])
             b = np.append(b, _b)
+
+        # Set bounds for integer variables
+        int_vars = list(set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
+
+        # Declare new constraints for upper and lower bound for integer variables
+        A_int = np.zeros((len(int_vars) * 2, A.shape[1]), dtype=np.int64)
+        b_int = np.zeros((len(int_vars) * 2, ), dtype=np.int64)
+        
+        # Lower bound for integers..
+        A_int[np.arange(len(int_vars) * 2, step=2), int_vars] = 1
+        b_int[np.arange(len(int_vars) * 2, step=2)] = self._dvec[int_vars].real
+        
+        # Upper bound for integers..
+        A_int[np.arange(len(int_vars) * 2, step=2) + 1, int_vars] = -1
+        b_int[np.arange(len(int_vars) * 2, step=2) + 1] = -1 * self._dvec[int_vars].imag
+
+        # Add them onto polyhedron
+        A = np.vstack([A, A_int])
+        b = np.append(b, b_int)
 
         # Reverse index map
         rimap = dict(map(lambda x: (x[1], x[0]), self._imap.items()))
@@ -713,7 +752,7 @@ class PLDAG:
             List[Dict[str, int]]
                 The solutions for the objectives.
         """
-        A, b, variables = self.to_polyhedron(fix)
+        A, b, variables = self.to_polyhedron(**fix)
         obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
         for i, obj in enumerate(objectives):
             obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
