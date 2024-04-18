@@ -22,7 +22,7 @@ model.set_primitives("xyz")
 id_ref = model.set_and(["x","y","z"], alias="A")
 
 # Later if we forget the ID, we can retrieve it like this
-id_ref_again = model.alias_to_id("A")
+id_ref_again = model.id_from_alias("A")
 assert id_ref == id_ref_again
 
 # So if we check when all x, y and z are set to 1, then we
