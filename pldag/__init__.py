@@ -2,7 +2,7 @@ import numpy as np
 from hashlib import sha1
 from itertools import groupby, repeat
 from functools import partial, lru_cache
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 from graphlib import TopologicalSorter
 
 from enum import Enum
@@ -39,6 +39,8 @@ class PLDAG:
         self._cvec = np.zeros((0, ),    dtype=bool)
         # Maps id's to index
         self._imap = {}
+        # Alias to id mapping
+        self._amap = {}
 
     def __hash__(self) -> int:
         return hash(self.sha1())
@@ -132,7 +134,7 @@ class PLDAG:
         """
         return self._col(id) - (~self._cvec).sum()
     
-    def _set_gelineq(self, children: list, bias: int, negate: bool = False) -> str:
+    def _set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at least `value`.
         """
@@ -145,6 +147,9 @@ class PLDAG:
             self._nvec = np.append(self._nvec, negate)
             self._cvec = np.append(self._cvec, True)
             self._imap[_id] = self._amat.shape[1] - 1
+
+        if alias:
+            self._amap[alias] = _id
 
         return _id
     
@@ -183,6 +188,22 @@ class PLDAG:
             previous_D = new_D
         
         raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
+    
+    def id_from_alias(self, alias: str) -> Optional[str]:
+        """Get the ID of the given alias"""
+        return self._amap.get(alias, None)
+    
+    def alias_to_ids(self, id: str) -> List[str]:
+        """Get the aliases of the given ID"""
+        return list(
+            map(
+                lambda x: x[0],
+                filter(
+                    lambda x: x[1] == id,
+                    self._amap.items(),
+                )
+            )
+        )
     
     def get(self, *id: str) -> np.ndarray:
         """Get the bounds of the given ID(s)"""
@@ -353,7 +374,7 @@ class PLDAG:
             self.set_primitive(id, bound)
         return ids
     
-    def set_atleast(self, references: List[str], value: int) -> str:
+    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at least `value`.
 
@@ -378,9 +399,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self._set_gelineq(references, -1 * value, False)
+        return self._set_gelineq(references, -1 * value, False, alias)
     
-    def set_atmost(self, references: List[str], value: int) -> str:
+    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at most `value`.
 
@@ -405,9 +426,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self._set_gelineq(references, -1 * (value + 1), True)
+        return self._set_gelineq(references, -1 * (value + 1), True, alias)
     
-    def set_or(self, references: List[str]) -> str:
+    def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of an OR operation.
 
@@ -429,9 +450,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(references, 1)
+        return self.set_atleast(references, 1, alias)
     
-    def set_and(self, references: List[str]) -> str:
+    def set_and(self, references: List[str], alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of an AND operation.
 
@@ -453,9 +474,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(references, len(references))
+        return self.set_atleast(references, len(references), alias)
     
-    def set_not(self, references: List[str]) -> str:
+    def set_not(self, references: List[str], alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of a NOT operation.
 
@@ -477,9 +498,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atmost(references, 0)
+        return self.set_atmost(references, 0, alias)
     
-    def set_xor(self, references: List[str]) -> str:
+    def set_xor(self, references: List[str], alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of an XOR operation.
 
@@ -504,9 +525,9 @@ class PLDAG:
         return self.set_and([
             self.set_atleast(references, 1),
             self.set_atmost(references, 1),
-        ])
+        ], alias)
     
-    def set_imply(self, condition: str, consequence: str) -> str:
+    def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of an IMPLY operation.
 
@@ -537,8 +558,38 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_or([self.set_not([condition]), consequence])
+        return self.set_or([self.set_not([condition]), consequence], alias)
 
+    def set_equal(self, references: List[str], alias: Optional[str] = None) -> str:
+        """
+            Add a composite constraint of an EQUAL operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_equal("x", "y")
+            >>> model.test({"x": 1j, "y": 1j}).get(a)
+            1j
+
+            >>> model.test({"x": 1+1j, "y": 0j}).get(a)
+            0j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self.set_xor([
+            self.set_and(references),
+            self.set_not(references),
+        ], alias)
+    
     @lru_cache
     def to_polyhedron(self, **fix) -> tuple:
 
