@@ -170,48 +170,53 @@ class PLDAG:
         return _id
     
     @staticmethod
-    def _prop_upstream_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
+    def _prop_upstream_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray):
         """
-            Propagates backwards, trying to infer values given what's been set. 
+            Propagates upstream, trying to infer values given what's been set. 
+            NOTE: a composite variable may be true while the equation isn't decided yet. This can happen if a parent composite
+            sets it's child, for instance a composite variable A, but the equation A = x + y >= 1 cannot be decided yet.
         """
-        def _prop_once(A: np.ndarray, C: np.ndarray, F: np.ndarray, B: np.ndarray, D: np.ndarray):
-            # There are two cases for when we can safely assume new bounds
-            # for variables:
-            
-            # 1. When the inner upper bound is 0 AND the outer bound is true.
-            #    Then we can assume each variable's bound in the composite to be their constant upper bound. I.e. set their variables lower bound to their upper bound.
-            #    For instance, [1 1](A) = [0 1](x) + [0 1](y) + [0 1](z) - [3 3] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[3 3] = [-3 0] and should result in x=1, y=1 and z=1, since A=1 is fixed
-            #    Or, [1 1](A) = [-1 0](x) + [-1 0](y) + [-1 0](z) >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0] = [-3 0] and should result in x=0, y=0, z=0, since A=1 is fixed
 
-            # 2. When the inner lower bound is -1 AND the outer bound is false.
-            #    Then we can assume each variable's bound in the composite to be their constant lower bound. I.e. set their variables upper bound to their lower bound.
-            #    For instance, [0 0](A) = [0 1](x) + [0 1](y) + [0 1](z) - [1 1] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[1 1] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
-            #    Or, [0 0] = [-1 0](x) + [-1 0](y) + [-1 0](z) + 2 >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0]+[2 2] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
-            
-            r = A.dot(D)
-            rf = (-1j * np.conj(r) * F + (1-F) * r) + B
-            
-            # m1 = (outer bound is true) & (inner upper bound is 0)
-            m1 = (D[C].real == 1) & (rf.imag == 0)
-            Dm1_part = (A[m1] == 1).any(axis=0) * D.imag
-            Dm1 = (Dm1_part + 1j * Dm1_part)
-
-            # m2 = (outer bound is false) & (inner lower bound is -1)
-            m2 = (D[C].real == 0) & (rf.real == -1)
-            Dm2_part = (A[m2] == 1).any(axis=0) * D.real
-            Dm2 = (Dm2_part + 1j * Dm2_part)
-
-            return Dm1 + Dm2 + (A[m1 | m2] == 0).all(axis=0) * D
+        # There are two cases for when we can safely assume new bounds
+        # for variables:
         
-        prop = partial(_prop_once, A, C, F, B)    
-        previous_D = D
-        for _ in range(max_iterations):
-            new_D = fixed * D + ~fixed * prop(previous_D)
-            if (new_D == previous_D).all():
-                return new_D
-            previous_D = new_D
+        # 1. When the inner upper bound is 0 AND the outer bound is true.
+        #    Then we can assume each variable's bound in the composite to be their constant upper bound. I.e. set their variables lower bound to their upper bound.
+        #    For instance, [1 1](A) = [0 1](x) + [0 1](y) + [0 1](z) - [3 3] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[3 3] = [-3 0] and should result in x=1, y=1 and z=1, since A=1 is fixed
+        #    Or, [1 1](A) = [-1 0](x) + [-1 0](y) + [-1 0](z) >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0] = [-3 0] and should result in x=0, y=0, z=0, since A=1 is fixed
 
-        raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
+        # 2. When the inner lower bound is -1 AND the outer bound is false.
+        #    Then we can assume each variable's bound in the composite to be their constant lower bound. I.e. set their variables upper bound to their lower bound.
+        #    For instance, [0 0](A) = [0 1](x) + [0 1](y) + [0 1](z) - [1 1] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[1 1] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
+        #    Or, [0 0] = [-1 0](x) + [-1 0](y) + [-1 0](z) + 2 >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0]+[2 2] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
+        
+        _A = np.vstack((np.zeros((A.shape[1]-A.shape[0], A.shape[1]), dtype=np.uint8), A))
+        _B = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=complex), B)
+        for i in filter(
+            lambda i: C[i], 
+            reversed(
+                list(
+                    TopologicalSorter(
+                        dict(
+                            map(
+                                lambda x: (x[0], set(map(lambda y: y[1], x[1]))), 
+                                groupby(np.argwhere(_A).tolist(), key=lambda x: x[0])
+                            )
+                        )
+                    ).static_order()
+                )
+            )
+        ):
+            r = _A[i].dot(D) + _B[i]
+            m = (_A[i] == 1) & ~fixed
+            # If the inner upper bound is 0 and the outer bound is true
+            if r.imag == 0 and D[i].real == 1:
+                D[m] = D[m].imag + D[m].imag * 1j
+
+            elif r.real == -1 and D[i].imag == 0:
+                D[m] = D[m].real + D[m].real * 1j
+
+        return D
     
     @staticmethod
     def _prop_algo_downstream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):

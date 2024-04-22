@@ -373,5 +373,9 @@ def test_propagate_upstream():
         ),
         model.set_xor(["x", "y", "z"], alias="x XOR y XOR z")
     ], alias="top")
-    bounds = model.test({"w": 10+10j, top: 1+1j})
-    model.printable(top)
+    model._dvec[model._imap["w"]] = 5+5j
+    model.propagate_downstream()
+    model._dvec[model._imap[top]] = 1+1j
+    model.propagate_upstream()
+    model.get("w") == 5+5j
+    model.get("x") == 1+1j
