@@ -39,7 +39,7 @@ def test_propagate():
     model = PLDAG()
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", 1)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(a), np.array([complex(1j)]))
 
     model = PLDAG()
@@ -47,13 +47,13 @@ def test_propagate():
     c = model.set_atleast("x", 1)
     b = model.set_atmost("yz", 1)
     a = model.set_atleast([b,c], 2)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(c), np.array([1j]))
     assert np.array_equal(model.get(b), np.array([1j]))
     assert np.array_equal(model.get(a), np.array([1j]))
     model.set_primitive("x", 1+1j)
     model.set_primitive("y", 0j)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(c), np.array([1+1j]))
     assert np.array_equal(model.get(b), np.array([1+1j]))
     assert np.array_equal(model.get(a), np.array([1+1j]))
@@ -63,10 +63,10 @@ def test_propagate():
     c=model.set_atmost("x", 0)
     b=model.set_atleast("xy", 1)
     a=model.set_atleast([b, c], 2)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.bounds, np.array([1j, 1j, 1j, 1j, 1j, 1j]))
     model.set_primitive("x", 1+1j)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(c), np.array([0j]))
     assert np.array_equal(model.get(a), np.array([0j]))
 
@@ -75,11 +75,11 @@ def test_integer_bounds():
     model = PLDAG()
     model.set_primitives("z", complex(0, 10000))
     a=model.set_atleast("z", 3000)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get("z"), np.array([complex(0, 10000)]))
     assert np.array_equal(model.get(a), np.array([complex(0, 1)]))
     model.set_primitives("z", complex(3000, 10000))
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(a), np.array([complex(1, 1)]))
 
 
@@ -87,10 +87,10 @@ def test_replace_composite():
     model = PLDAG()
     model.set_primitives("xyz")
     a = model.set_atleast("xyz", 1)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(a), np.array([1j]))
     a = model.set_atleast("xyz", 0)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(a), np.array([1+1j]))
 
 def test_get():
@@ -188,7 +188,7 @@ def test_cycle_detection():
     # Since x is a primitive boolean variable it should have 0-1 as init
     # bountds
     model.get("x")[0] == 1j
-    model.propagate()
+    model.propagate_downstream()
     # However, since we connected A to x, x is considered by the model
     # as a composite and will therefore eventually be evaluated as x = A >= 0
     # which is 1-1
@@ -200,7 +200,7 @@ def test_multiple_pointers():
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", 1)
     b=model.set_atleast("xyz", 1)
-    model.propagate()
+    model.propagate_downstream()
     assert np.array_equal(model.get(a), np.array([1j]))
     assert np.array_equal(model.get(b), np.array([1j]))
 
@@ -222,11 +222,19 @@ def test_to_polyhedron():
     model.set_atmost("abcd", 5)
     A,b,vs = model.to_polyhedron()
     assert np.array_equal(A, np.array([
-        [  0,   1,   0,   0,   1,  -3,   0,   0],
-        [  1,   1,   1,   1,   0,   0,  -4,   0],
-        [ -1,  -1,  -1,  -1,   0,   0,   0,  -9],
+        [ 0,  1,  0,  0,  1, -3,  0,  0],
+        [ 1,  1,  1,  1,  0,  0, -4,  0],
+        [-1, -1, -1, -1,  0,  0,  0, -9],
+        [ 1,  0,  0,  0,  0,  0,  0,  0],
+        [-1,  0,  0,  0,  0,  0,  0,  0],
+        [ 0,  1,  0,  0,  0,  0,  0,  0],
+        [ 0, -1,  0,  0,  0,  0,  0,  0],
+        [ 0,  0,  1,  0,  0,  0,  0,  0],
+        [ 0,  0, -1,  0,  0,  0,  0,  0],
+        [ 0,  0,  0,  1,  0,  0,  0,  0],
+        [ 0,  0,  0, -1,  0,  0,  0,  0],
     ]))
-    assert np.array_equal(b, np.array([0,-13,-14]))
+    assert np.array_equal(b, np.array([0., -13., -14.,  -5.,  -3.,   0.,  -2.,  -4.,  -4.,  -4.,  -5.]))
 
     model = PLDAG()
     model.set_primitives("xyz")
@@ -257,15 +265,15 @@ def test_to_polyhedron():
     assert np.array_equal(b, np.array([ 0]))
     assert len(vs) == 4
 
-    A,b,vs = model.to_polyhedron(fix={a: 1, "x": 1, "y": 1, "z": 1})
+    A,b,vs = model.to_polyhedron(**{a: 1, "x": 1, "y": 1, "z": 1})
     assert np.array_equal(A, np.array([[1,1,1,-1], [1,1,1,1]]))
     assert np.array_equal(b, np.array([ 0, 4]))
 
-    A,b,vs = model.to_polyhedron(fix={a: -1, "x": -1, "y": -1, "z": -1})
+    A,b,vs = model.to_polyhedron(**{a: -1, "x": -1, "y": -1, "z": -1})
     assert np.array_equal(A, np.array([[1,1,1,-1], [1,1,1,1]]))
     assert np.array_equal(b, np.array([ 0, -4]))
 
-    A,b,vs = model.to_polyhedron(fix={a: 2, "x": 2, "y": 0, "z": 0})
+    A,b,vs = model.to_polyhedron(**{a: 2, "x": 2, "y": 0, "z": 0})
     assert np.array_equal(A, np.array([[1,1,1,-1], [1,0,0,1], [0,1,1,0]]))
     assert np.array_equal(b, np.array([ 0, 4, 0]))
 
@@ -325,3 +333,45 @@ def test_sub():
     not_included = [model.set_and(["m1", "e1"]), model.set_and(["m2", "e2"])]
     sub_model = model.sub([sub_id])
     assert all(map(lambda id: id not in sub_model._imap, not_included))
+
+def test_propagate_upstream():
+
+    model = PLDAG()
+    model.set_primitive("x", 10j)
+    model.set_primitive("y")
+    id1 = model.set_atleast(["x"], 10)
+    id2 = model.set_atleast(["x", "y"], 11)
+    model._dvec[model._imap[id1]] = 1+1j
+    model._dvec[model._imap[id2]] = 1+1j
+    model.get("x") == 10j
+    model.get("y") == 1j
+    model.propagate_upstream()
+    model.get("x") == 10+10j
+    model.get("y") == 1+1j
+    
+    model = PLDAG()
+    model.set_primitive("w", 10j)
+    model.set_primitives("xyz")
+    top = model.set_and([
+        model.set_imply(
+            model.set_atleast(["w"], 5),
+            "x",
+            alias="(w >= 5) -> x"
+        ),
+        model.set_imply(
+            model.set_and([
+                model.set_atleast(["w"], 2),
+                model.set_atmost(["w"], 4),
+            ]),
+            "y",
+            alias="(2 <= w <= 4) -> y"
+        ),
+        model.set_imply(
+            model.set_atmost(["w"], 1),
+            "z",
+            alias="(w <= 1) -> z"
+        ),
+        model.set_xor(["x", "y", "z"], alias="x XOR y XOR z")
+    ], alias="top")
+    bounds = model.test({"w": 10+10j, top: 1+1j})
+    model.printable(top)

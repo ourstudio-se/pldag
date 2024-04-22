@@ -28,6 +28,6 @@ def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=
     )
 
     if any(map(lambda x: x[0] != 'optimal', solutions)):
-        raise Exception("Some objectives are not optimal")
+        raise Exception("Could not find solutions. Please check constraints.")
     
     return list(map(lambda x: x[1], solutions))

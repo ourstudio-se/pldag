@@ -110,6 +110,22 @@ class PLDAG:
     def _row_vars(self) -> np.ndarray:
         return np.array(list(self._imap.keys()))[self._cvec]
     
+    @property
+    def _inner_bounds(self) -> np.ndarray:
+        return self._amat.dot(self._dvec) + self._bvec
+    
+    def printable(self, id: str) -> str:
+        """
+            Get the printable version of the given ID.
+        """
+        if id in self.primitives:
+            return f"{id} = {self._dvec[self._col(id)]}"
+        elif id in self.composites:
+            join_on = " + " if self._nvec[self._row(id)] == 0 else " - "
+            return f"{id} = " + join_on.join(self.dependencies(id)) + f" + {self._bvec[self._row(id)].real} >= 0"
+        else:
+            raise ValueError(f"ID {id} not found.")
+    
     def _icol(self, i: int) -> str:
         """
             Returns the ID of the given column index.
@@ -154,7 +170,51 @@ class PLDAG:
         return _id
     
     @staticmethod
-    def _prop_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, forced: np.ndarray, max_iterations: int = 100):
+    def _prop_upstream_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
+        """
+            Propagates backwards, trying to infer values given what's been set. 
+        """
+        def _prop_once(A: np.ndarray, C: np.ndarray, F: np.ndarray, B: np.ndarray, D: np.ndarray):
+            # There are two cases for when we can safely assume new bounds
+            # for variables:
+            
+            # 1. When the inner upper bound is 0 AND the outer bound is true.
+            #    Then we can assume each variable's bound in the composite to be their constant upper bound. I.e. set their variables lower bound to their upper bound.
+            #    For instance, [1 1](A) = [0 1](x) + [0 1](y) + [0 1](z) - [3 3] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[3 3] = [-3 0] and should result in x=1, y=1 and z=1, since A=1 is fixed
+            #    Or, [1 1](A) = [-1 0](x) + [-1 0](y) + [-1 0](z) >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0] = [-3 0] and should result in x=0, y=0, z=0, since A=1 is fixed
+
+            # 2. When the inner lower bound is -1 AND the outer bound is false.
+            #    Then we can assume each variable's bound in the composite to be their constant lower bound. I.e. set their variables upper bound to their lower bound.
+            #    For instance, [0 0](A) = [0 1](x) + [0 1](y) + [0 1](z) - [1 1] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[1 1] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
+            #    Or, [0 0] = [-1 0](x) + [-1 0](y) + [-1 0](z) + 2 >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0]+[2 2] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
+            
+            r = A.dot(D)
+            rf = (-1j * np.conj(r) * F + (1-F) * r) + B
+            
+            # m1 = (outer bound is true) & (inner upper bound is 0)
+            m1 = (D[C].real == 1) & (rf.imag == 0)
+            Dm1_part = (A[m1] == 1).any(axis=0) * D.imag
+            Dm1 = (Dm1_part + 1j * Dm1_part)
+
+            # m2 = (outer bound is false) & (inner lower bound is -1)
+            m2 = (D[C].real == 0) & (rf.real == -1)
+            Dm2_part = (A[m2] == 1).any(axis=0) * D.real
+            Dm2 = (Dm2_part + 1j * Dm2_part)
+
+            return Dm1 + Dm2 + (A[m1 | m2] == 0).all(axis=0) * D
+        
+        prop = partial(_prop_once, A, C, F, B)    
+        previous_D = D
+        for _ in range(max_iterations):
+            new_D = fixed * D + ~fixed * prop(previous_D)
+            if (new_D == previous_D).all():
+                return new_D
+            previous_D = new_D
+
+        raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
+    
+    @staticmethod
+    def _prop_algo_downstream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
 
         """
             Propagation algorithm.
@@ -164,7 +224,7 @@ class PLDAG:
             C: which nodes are compositions
             D: the initial bounds
             F: the negation vector
-            forced: boolean (won't change during propagation) (optional)
+            fixed: boolean vector (optional)
             max_iterations: the maximum number of iterations (optional)
 
             Returns the propagated bounds.
@@ -182,7 +242,7 @@ class PLDAG:
         prop = partial(_prop_once, A, C, F, B)    
         previous_D = D
         for _ in range(max_iterations):
-            new_D = forced * D + ~forced * prop(previous_D)
+            new_D = fixed * D + ~fixed * prop(previous_D)
             if (new_D == previous_D).all():
                 return new_D
             previous_D = new_D
@@ -228,9 +288,9 @@ class PLDAG:
         """Get the negated state of the given id"""
         return bool(self._nvec[self._row(id)])
 
-    def propagate(self):
+    def propagate_downstream(self):
         """
-            Propagates the graph and stores the propagated bounds.
+            Propagates the graph downstream, towards the root node(s), and returns the propagated bounds.
 
             Examples
             --------
@@ -256,13 +316,42 @@ class PLDAG:
         D: np.ndarray = self._dvec
         F: np.ndarray = self._nvec
 
-        # Propagate the graph and store the result as new bounds
-        self._dvec = self._prop_algo(A, B, C, D, F, np.zeros(D.shape[0], dtype=bool))
+        self._dvec = self._prop_algo_downstream(A, B, C, D, F, np.zeros(D.shape[0], dtype=bool))
+    
+    def propagate_upstream(self):
+        """
+            Propagates the graph upstream, from the root node(s), and returns the propagated bounds.
 
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_atleast("xy", 1)
+            >>> model.propagate_upstream()
+            >>> model.get(a)
+            1j
+            
+            >>> model.set_primitive("x", 1+1j)
+            >>> model.propagate_upstream()
+            >>> model.get(a)
+            1+1j
+
+            Returns
+            -------
+            None
+        """
+        A: np.ndarray = self._amat
+        B: np.ndarray = self._bvec
+        C: np.ndarray = self._cvec
+        D: np.ndarray = self._dvec
+        F: np.ndarray = self._nvec
+
+        self._dvec = self._prop_upstream_algo(A, B, C, D, F, np.zeros(D.shape[0], dtype=bool))
+    
     def test(self, query: Dict[str, complex], freeze: bool = True) -> Dict[str, complex]:
 
         """
-            Propagates the graph and returns the result.
+            Propagates the graph downstream and returns the result.
 
             Parameters
             ----------
@@ -302,7 +391,7 @@ class PLDAG:
         # Replace the observed bounds
         D[[self._imap[q] for q in query]] = np.array(list(query.values()))
 
-        return dict(zip(self._imap.keys(), self._prop_algo(A, B, C, D, F, qprimes)))
+        return dict(zip(self._imap.keys(), self._prop_algo_downstream(A, B, C, D, F, qprimes)))
     
     def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
         """
