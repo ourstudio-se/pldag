@@ -6,16 +6,9 @@ from typing import Dict, List, Set, Optional
 from graphlib import TopologicalSorter
 
 from enum import Enum
-from importlib import import_module
 
 class Solver(Enum):
     GLPK = "glpk"
-
-# Add more solvers here as they are implemented
-try:
-    import_module('pldag.solver.glpk_solver')
-except ImportError:
-    Solver.GLPK = None
 
 class PLDAG:
 
