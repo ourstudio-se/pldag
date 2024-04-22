@@ -1,6 +1,10 @@
 import numpy as np
-import npycvx
 import functools
+
+try:
+    import npycvx
+except ImportError:
+    raise ImportError("Please install the npycvx package to use GLPK solver module.")
 
 def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=set()):
     """
