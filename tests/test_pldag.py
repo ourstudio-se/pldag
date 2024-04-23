@@ -379,3 +379,33 @@ def test_propagate_upstream():
     model.propagate_upstream()
     model.get("w") == 5+5j
     model.get("x") == 1+1j
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    id = model.set_xor("xyz")
+    model.set_primitive("x", 1+1j)
+    model.propagate_downstream()
+    model._dvec[model._imap[id]] = 1+1j
+    model.propagate_upstream()
+    model.get("x") == 1+1j
+    model.get("y") == 0j
+    model.get("z") == 0j
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    id = model.set_or("xyz")
+    model.propagate_downstream()
+    model._dvec[model._imap[id]] = 0j
+    model.propagate_upstream()
+    model.get("x") == 0j
+    model.get("y") == 0j
+    model.get("z") == 0j
+
+    model = PLDAG()
+    model.set_primitives("xy")
+    id = model.set_atmost("xy", 1)
+    model.propagate_downstream()
+    model._dvec[model._imap[id]] = 0j
+    model.propagate_upstream()
+    model.get("x") == 1+1j
+    model.get("y") == 1+1j

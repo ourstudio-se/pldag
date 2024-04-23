@@ -185,6 +185,8 @@ class PLDAG:
         
         _A = np.vstack((np.zeros((A.shape[1]-A.shape[0], A.shape[1]), dtype=np.uint8), A))
         _B = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=complex), B)
+        _F = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=bool), F)
+        _fixed = fixed | (D.real == D.imag)
         for i in filter(
             lambda i: C[i], 
             reversed(
@@ -200,14 +202,22 @@ class PLDAG:
                 )
             )
         ):
-            r = _A[i].dot(D) + _B[i]
-            m = (_A[i] == 1) & ~fixed
-            # If the inner upper bound is 0 and the outer bound is true
-            if r.imag == 0 and D[i].real == 1:
-                D[m] = D[m].imag + D[m].imag * 1j
+            r = _A[i].dot(D)
+            rf = (-1j * np.conj(r) * _F[i] + (1-_F[i]) * r) + _B[i]
+            m = (_A[i] == 1) & ~_fixed
+            re = D[m].real
+            im = D[m].imag
+            if rf.imag == 0 and D[i].real == 1:
+                if _F[i]:
+                    D[m] = re + re * 1j
+                else:
+                    D[m] = im + im * 1j
 
-            elif r.real == -1 and D[i].imag == 0:
-                D[m] = D[m].real + D[m].real * 1j
+            elif rf.real == -1 and D[i].imag == 0:
+                if _F[i]:
+                    D[m] = im + im * 1j
+                else:
+                    D[m] = re + re * 1j
 
         return D
     
