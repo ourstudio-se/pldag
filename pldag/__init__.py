@@ -182,13 +182,13 @@ class PLDAG:
         #    Then we can assume each variable's bound in the composite to be their constant lower bound. I.e. set their variables upper bound to their lower bound.
         #    For instance, [0 0](A) = [0 1](x) + [0 1](y) + [0 1](z) - [1 1] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[1 1] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
         #    Or, [0 0] = [-1 0](x) + [-1 0](y) + [-1 0](z) + 2 >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0]+[2 2] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
-        
         _A = np.vstack((np.zeros((A.shape[1]-A.shape[0], A.shape[1]), dtype=np.uint8), A))
         _B = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=complex), B)
         _F = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=bool), F)
         _fixed = fixed | (D.real == D.imag)
+        M = (_A == 1) & ~_fixed
         for i in filter(
-            lambda i: C[i], 
+            lambda i: C[i] and M[i].any(), 
             reversed(
                 list(
                     TopologicalSorter(
@@ -204,20 +204,19 @@ class PLDAG:
         ):
             r = _A[i].dot(D)
             rf = (-1j * np.conj(r) * _F[i] + (1-_F[i]) * r) + _B[i]
-            m = (_A[i] == 1) & ~_fixed
-            re = D[m].real
-            im = D[m].imag
+            re = D[M[i]].real
+            im = D[M[i]].imag
             if rf.imag == 0 and D[i].real == 1:
                 if _F[i]:
-                    D[m] = re + re * 1j
+                    D[M[i]] = re + re * 1j
                 else:
-                    D[m] = im + im * 1j
+                    D[M[i]] = im + im * 1j
 
             elif rf.real == -1 and D[i].imag == 0:
                 if _F[i]:
-                    D[m] = im + im * 1j
+                    D[M[i]] = im + im * 1j
                 else:
-                    D[m] = re + re * 1j
+                    D[M[i]] = re + re * 1j
 
         return D
     
@@ -262,7 +261,7 @@ class PLDAG:
         """
             Propagates the graph downstream and upstream, and returns the propagated bounds.
         """
-        return PLDAG._prop_upstream_algo(A, B, C, PLDAG._prop_algo_downstream(A, B, C, D, F, fixed), F, fixed, max_iterations)
+        return PLDAG._prop_upstream_algo(A, B, C, PLDAG._prop_algo_downstream(A, B, C, D, F, fixed, max_iterations), F, fixed)
     
     def _propagate(self, method: str, query: dict, freeze: bool = True) -> dict:
         """
@@ -385,11 +384,11 @@ class PLDAG:
         """
         return self._propagate("upstream", query, freeze)
 
-    def propagate_bistream(self, query: Dict[str, complex], freeze: bool = True) -> dict:
+    def propagate_bistream(self, query: Dict[str, complex] = {}, freeze: bool = True) -> dict:
         """
             Propagates the graph downstream and upstream, and returns the propagated bounds.
         """
-        return self.propagate_bistream(query, freeze)
+        return self._propagate("bistream", query, freeze)
     
     def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
         """

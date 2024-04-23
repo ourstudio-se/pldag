@@ -337,6 +337,27 @@ def test_sub():
 def test_propagate_upstream():
 
     model = PLDAG()
+    model.set_primitives("xy")
+    model.set_primitive("t", 10j)
+
+    id = model.set_and([
+        model.set_xor([
+            model.set_imply(
+                model.set_atleast("t", 7),
+                "x"
+            ),
+            model.set_imply(
+                model.set_atmost("t", 6),
+                "y"
+            ),
+        ]),
+        model.set_xor(["x", "y"])
+    ])
+    res = model.propagate_bistream({"t": 7+7j, id: 1+1j}, freeze=True)
+    res.get("x") == 0j
+    res.get("y") == 1+1j
+
+    model = PLDAG()
     model.set_primitive("x", 10j)
     model.set_primitive("y")
     id1 = model.set_atleast(["x"], 10)
