@@ -141,7 +141,7 @@ class PLDAG:
         """
             Returns the row index of the given ID.
         """
-        return self._col(id) - (~self._cvec).sum()
+        return self.composites.tolist().index(id)
     
     def _set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> str:
         """
@@ -251,7 +251,7 @@ class PLDAG:
         """Get the ID of the given alias"""
         return self._amap.get(alias, None)
     
-    def alias_to_ids(self, id: str) -> List[str]:
+    def id_to_alias(self, id: str) -> List[str]:
         """Get the aliases of the given ID"""
         return list(
             map(
