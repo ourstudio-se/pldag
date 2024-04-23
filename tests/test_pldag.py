@@ -39,59 +39,59 @@ def test_propagate():
     model = PLDAG()
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", 1)
-    model.propagate_downstream()
-    assert np.array_equal(model.get(a), np.array([complex(1j)]))
+    res=model.propagate_downstream()
+    assert res.get(a) == 1j
 
     model = PLDAG()
     model.set_primitives("xyz")
     c = model.set_atleast("x", 1)
     b = model.set_atmost("yz", 1)
     a = model.set_atleast([b,c], 2)
-    model.propagate_downstream()
-    assert np.array_equal(model.get(c), np.array([1j]))
-    assert np.array_equal(model.get(b), np.array([1j]))
-    assert np.array_equal(model.get(a), np.array([1j]))
+    res=model.propagate_downstream()
+    assert res.get(c) == 1j
+    assert res.get(b) == 1j
+    assert res.get(a) == 1j
     model.set_primitive("x", 1+1j)
     model.set_primitive("y", 0j)
-    model.propagate_downstream()
-    assert np.array_equal(model.get(c), np.array([1+1j]))
-    assert np.array_equal(model.get(b), np.array([1+1j]))
-    assert np.array_equal(model.get(a), np.array([1+1j]))
+    res=model.propagate_downstream()
+    assert np.array_equal(res.get(c), 1+1j)
+    assert np.array_equal(res.get(b), 1+1j)
+    assert np.array_equal(res.get(a), 1+1j)
     
     model = PLDAG()
     model.set_primitives("xyz")
     c=model.set_atmost("x", 0)
     b=model.set_atleast("xy", 1)
     a=model.set_atleast([b, c], 2)
-    model.propagate_downstream()
-    assert np.array_equal(model.bounds, np.array([1j, 1j, 1j, 1j, 1j, 1j]))
+    res=model.propagate_downstream()
+    assert np.array_equal(np.array(list(res.values())), np.array([1j, 1j, 1j, 1j, 1j, 1j]))
     model.set_primitive("x", 1+1j)
-    model.propagate_downstream()
-    assert np.array_equal(model.get(c), np.array([0j]))
-    assert np.array_equal(model.get(a), np.array([0j]))
+    res=model.propagate_downstream()
+    assert res.get(c) == 0j
+    assert res.get(a) == 0j
 
 def test_integer_bounds():
 
     model = PLDAG()
     model.set_primitives("z", complex(0, 10000))
     a=model.set_atleast("z", 3000)
-    model.propagate_downstream()
-    assert np.array_equal(model.get("z"), np.array([complex(0, 10000)]))
-    assert np.array_equal(model.get(a), np.array([complex(0, 1)]))
+    res=model.propagate_downstream()
+    assert res.get("z")==10000j
+    assert model.get(a)==1j
     model.set_primitives("z", complex(3000, 10000))
-    model.propagate_downstream()
-    assert np.array_equal(model.get(a), np.array([complex(1, 1)]))
+    res=model.propagate_downstream()
+    assert res.get(a)==1+1j
 
 
 def test_replace_composite():
     model = PLDAG()
     model.set_primitives("xyz")
     a = model.set_atleast("xyz", 1)
-    model.propagate_downstream()
-    assert np.array_equal(model.get(a), np.array([1j]))
+    res=model.propagate_downstream()
+    assert res.get(a) == 1j
     a = model.set_atleast("xyz", 0)
-    model.propagate_downstream()
-    assert np.array_equal(model.get(a), np.array([1+1j]))
+    res=model.propagate_downstream()
+    assert res.get(a)==1+1j
 
 def test_get():
     model = PLDAG()
@@ -100,38 +100,38 @@ def test_get():
     for id, expected in zip(["x", "y", "z", a], np.array([[1j], [1j], [1j], [1j]])):
         assert np.array_equal(model.get(id), expected)
 
-def test_test():
+def test_propagate_query():
     model = PLDAG()
     model.set_primitives("xyz")
     id = model.set_atleast("xyz", 1)
 
-    assert model.test({"x": 1+1j}).get(id) == 1+1j
-    assert model.test({"x": 1j}).get(id) == 1j
-    assert model.test({"x": 0j}).get(id) == 1j
-    assert model.test({"x": 0j, "y": 0j, "z": 0j}).get(id) == 0j
+    assert model.propagate_downstream({"x": 1+1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 0j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 0j, "y": 0j, "z": 0j}).get(id) == 0j
 
     model = PLDAG()
     model.set_primitives("xyz")
     a = model.set_atmost(["x","y"], 1)
-    assert model.test({"x": 1+1j}).get(a) == 1j
-    assert model.test({"x": 1+1j, "y": 0j}).get(a) == 1+1j
-    assert model.test({"x": 1+1j, "y": 1+1j}).get(a) == 0j
+    assert model.propagate_downstream({"x": 1+1j}).get(a) == 1j
+    assert model.propagate_downstream({"x": 1+1j, "y": 0j}).get(a) == 1+1j
+    assert model.propagate_downstream({"x": 1+1j, "y": 1+1j}).get(a) == 0j
 
     model = PLDAG()
     model.set_primitives("xy")
     a = model.set_and(["x"])
     b = model.set_not(["y"])
     c = model.set_and([a, b])
-    assert model.test({"x": 1+1j, "y": 0j}).get(c) == 1+1j
-    assert model.test({"y": 0j, "x": 1+1j}).get(c) == 1+1j
+    assert model.propagate_downstream({"x": 1+1j, "y": 0j}).get(c) == 1+1j
+    assert model.propagate_downstream({"y": 0j, "x": 1+1j}).get(c) == 1+1j
 
-def test_test_second():
+def test_propagate_query_second():
     model = PLDAG() 
     model.set_primitives("xyz")
     c = model.set_atmost(["x"], 0)
     b = model.set_atleast(["y", "z"], 2)
     a = model.set_atleast([b, c], 1)
-    assert model.test({
+    assert model.propagate_downstream({
         "x": 1+1j, 
         "y": 1+1j, 
         "z": 1+1j
@@ -140,12 +140,12 @@ def test_test_second():
     assert model.get("x") == +1j
     assert model.get("y") == +1j
     assert model.get("z") == +1j
-    assert model.test({
+    assert model.propagate_downstream({
         "x": 1+1j, 
         "y": 0j, 
         "z": 1+1j
     }).get(a) == 0j
-    assert model.test({
+    assert model.propagate_downstream({
         "x": 1j, 
         "y": 0j, 
         "z": 1j
@@ -200,7 +200,7 @@ def test_multiple_pointers():
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", 1)
     b=model.set_atleast("xyz", 1)
-    model.propagate_downstream()
+    res=model.propagate_downstream()
     assert np.array_equal(model.get(a), np.array([1j]))
     assert np.array_equal(model.get(b), np.array([1j]))
 
@@ -282,41 +282,41 @@ def test_logical_operators():
     model = PLDAG()
     model.set_primitives("xyz")
     id = model.set_or("xyz")
-    assert model.test({"x": 1j}).get(id) == 1j
-    assert model.test({"x": 1+1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 1+1j}).get(id) == 1+1j
 
     model = PLDAG()
     model.set_primitives("xyz")
     id = model.set_and("xyz")
-    assert model.test({"x": 1j, "y": 1+1j}).get(id) == 1j
-    assert model.test({"x": 1+1j, "y": 1+1j, "z": 1+1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1j, "y": 1+1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 1+1j, "y": 1+1j, "z": 1+1j}).get(id) == 1+1j
 
     model = PLDAG()
     model.set_primitives("xyz")
     id = model.set_not("xyz")
-    assert model.test({"x": 1j, "y": 1j}).get(id) == 1j
-    assert model.test({"x": 1j, "y": 1+1j}).get(id) == 0j
-    assert model.test({"x": 1+1j, "y": 1j}).get(id) == 0j
-    assert model.test({"x": 1+1j, "y": 1+1j, "z": 1+1j}).get(id) == 0j
-    assert model.test({"x": 0j, "y": 0j, "z": 0j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1j, "y": 1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 1j, "y": 1+1j}).get(id) == 0j
+    assert model.propagate_downstream({"x": 1+1j, "y": 1j}).get(id) == 0j
+    assert model.propagate_downstream({"x": 1+1j, "y": 1+1j, "z": 1+1j}).get(id) == 0j
+    assert model.propagate_downstream({"x": 0j, "y": 0j, "z": 0j}).get(id) == 1+1j
 
     model = PLDAG()
     model.set_primitives("xy")
     id = model.set_imply("x", "y")
-    assert model.test({"x": 1j, "y": 1j}).get(id) == 1j
-    assert model.test({"x": 1j, "y": 1+1j}).get(id) == 1+1j
-    assert model.test({"x": 1+1j, "y": 0j}).get(id) == 0j
-    assert model.test({"x": 0j, "y": 1j}).get(id) == 1+1j
-    assert model.test({"x": 0j, "y": 1+1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1j, "y": 1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 1j, "y": 1+1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1+1j, "y": 0j}).get(id) == 0j
+    assert model.propagate_downstream({"x": 0j, "y": 1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 0j, "y": 1+1j}).get(id) == 1+1j
 
     model = PLDAG()
     model.set_primitives("xy")
     id = model.set_xor("xy")
-    assert model.test({"x": 1j, "y": 1j}).get(id) == 1j
-    assert model.test({"x": 1j, "y": 1+1j}).get(id) == 1j
-    assert model.test({"x": 1+1j, "y": 0j}).get(id) == 1+1j
-    assert model.test({"x": 0j, "y": 1j}).get(id) == 1j
-    assert model.test({"x": 0j, "y": 1+1j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 1j, "y": 1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 1j, "y": 1+1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 1+1j, "y": 0j}).get(id) == 1+1j
+    assert model.propagate_downstream({"x": 0j, "y": 1j}).get(id) == 1j
+    assert model.propagate_downstream({"x": 0j, "y": 1+1j}).get(id) == 1+1j
 
 def test_sub():
     model = PLDAG()

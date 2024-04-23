@@ -257,6 +257,49 @@ class PLDAG:
         
         raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
     
+    @staticmethod
+    def _prop_algo_bistream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
+        """
+            Propagates the graph downstream and upstream, and returns the propagated bounds.
+        """
+        return PLDAG._prop_upstream_algo(A, B, C, PLDAG._prop_algo_downstream(A, B, C, D, F, fixed), F, fixed, max_iterations)
+    
+    def _propagate(self, method: str, query: dict, freeze: bool = True) -> dict:
+        """
+            Propagates the graph downstream and returns the propagated bounds.
+        """
+        A: np.ndarray = self._amat
+        B: np.ndarray = self._bvec
+        C: np.ndarray = self._cvec
+        D: np.ndarray = self._dvec.copy()
+        F: np.ndarray = self._nvec
+
+        # Filter query based on existing variables
+        query = {k: v for k, v in query.items() if k in self._imap}
+
+        # Query translation into primes
+        qprimes = np.zeros(D.shape[0], dtype=bool)
+        qprimes[[self._imap[q] for q in query]] = True and freeze
+
+        # Replace the observed bounds
+        D[[self._imap[q] for q in query]] = np.array(list(query.values()))
+
+        if method == "downstream":
+            res = self._prop_algo_downstream(A, B, C, D, F, qprimes)
+        elif method == "upstream":
+            res = self._prop_upstream_algo(A, B, C, D, F, qprimes)
+        elif method == "bistream":
+            res = self._prop_algo_bistream(A, B, C, D, F, qprimes)
+        else:
+            raise ValueError(f"Method '{method}' not found.")
+        
+        return dict(
+            zip(
+                self._imap.keys(),
+                res,
+            )
+        )
+    
     def id_from_alias(self, alias: str) -> Optional[str]:
         """Get the ID of the given alias"""
         return self._amap.get(alias, None)
@@ -296,7 +339,7 @@ class PLDAG:
         """Get the negated state of the given id"""
         return bool(self._nvec[self._row(id)])
 
-    def propagate_downstream(self):
+    def propagate_downstream(self, query: dict = {}, freeze: bool = True) -> dict:
         """
             Propagates the graph downstream, towards the root node(s), and returns the propagated bounds.
 
@@ -318,15 +361,9 @@ class PLDAG:
             -------
             None
         """
-        A: np.ndarray = self._amat
-        B: np.ndarray = self._bvec
-        C: np.ndarray = self._cvec
-        D: np.ndarray = self._dvec
-        F: np.ndarray = self._nvec
-
-        self._dvec = self._prop_algo_downstream(A, B, C, D, F, np.zeros(D.shape[0], dtype=bool))
+        return self._propagate("downstream", query, freeze)
     
-    def propagate_upstream(self):
+    def propagate_upstream(self, query: dict = {}, freeze: bool = True) -> dict:
         """
             Propagates the graph upstream, from the root node(s), and returns the propagated bounds.
 
@@ -335,71 +372,24 @@ class PLDAG:
             >>> model = PLDAG()
             >>> model.set_primitives("xy")
             >>> a = model.set_atleast("xy", 1)
-            >>> model.propagate_upstream()
-            >>> model.get(a)
+            >>> model.propagate_upstream().get(a)
             1j
             
             >>> model.set_primitive("x", 1+1j)
-            >>> model.propagate_upstream()
-            >>> model.get(a)
+            >>> model.propagate_upstream().get(a)
             1+1j
 
             Returns
             -------
             None
         """
-        A: np.ndarray = self._amat
-        B: np.ndarray = self._bvec
-        C: np.ndarray = self._cvec
-        D: np.ndarray = self._dvec
-        F: np.ndarray = self._nvec
+        return self._propagate("upstream", query, freeze)
 
-        self._dvec = self._prop_upstream_algo(A, B, C, D, F, np.zeros(D.shape[0], dtype=bool))
-    
-    def test(self, query: Dict[str, complex], freeze: bool = True) -> Dict[str, complex]:
-
+    def propagate_bistream(self, query: Dict[str, complex], freeze: bool = True) -> dict:
         """
-            Propagates the graph downstream and returns the result.
-
-            Parameters
-            ----------
-            query : Dict[str, complex]
-                The query to test.
-
-            freeze : bool = True
-                If the bounds given in query should be changeable
-                during propagation.
-
-            Examples
-            --------
-            >>> model = PLDAG()
-            >>> model.set_primitives("xy")
-            >>> a = model.set_atleast("xy", 1)
-            >>> model.test({"x": 1j, "y": 1+1j}).get(a)
-            1+1j
-
-            Returns
-            -------
-            Dict[str, complex]
-                The result of the query.
+            Propagates the graph downstream and upstream, and returns the propagated bounds.
         """
-        A: np.ndarray = self._amat
-        B: np.ndarray = self._bvec
-        C: np.ndarray = self._cvec
-        D: np.ndarray = self._dvec.copy()
-        F: np.ndarray = self._nvec
-
-        # Filter query based on existing variables
-        query = {k: v for k, v in query.items() if k in self._imap}
-
-        # Query translation into primes
-        qprimes = np.zeros(D.shape[0], dtype=bool)
-        qprimes[[self._imap[q] for q in query]] = True and freeze
-
-        # Replace the observed bounds
-        D[[self._imap[q] for q in query]] = np.array(list(query.values()))
-
-        return dict(zip(self._imap.keys(), self._prop_algo_downstream(A, B, C, D, F, qprimes)))
+        return self.propagate_bistream(query, freeze)
     
     def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
         """
@@ -873,7 +863,7 @@ class PLDAG:
     
     def solve(self, objectives: List[Dict[str, int]], fix: Dict[str, int], solver: Solver) -> List[Dict[str, int]]:
         """
-            Solve the polyhedron with the given objectives.
+            Solves the model with the given objectives.
 
             Parameters
             ----------
@@ -891,7 +881,6 @@ class PLDAG:
             >>> model = PLDAG()
             >>> model.set_primitives("xyz")
             >>> a = model.set_atleast("xyz", 1)
-            >>> A,b,vs = model.to_polyhedron()
             >>> model.solve([{"x": 0, "y": 1, "z": 0}], Solver.GLPK)
             [{'x': 0, 'y': 1, 'z': 0}]
 
