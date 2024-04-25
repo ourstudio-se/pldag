@@ -897,7 +897,7 @@ class PLDAG:
             from pldag.solver.glpk_solver import solve_lp
             solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
         else:
-            raise ValueError("Solver not implemented.")
+            raise ValueError(f"Solver `{solver}` not installed.")
         
         return list(
             map(

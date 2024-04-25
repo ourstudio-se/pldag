@@ -1,6 +1,8 @@
 import numpy as np
 import functools
 
+from . import NoSolutionsException
+
 try:
     import npycvx
 except ImportError:
@@ -32,6 +34,6 @@ def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=
     )
 
     if any(map(lambda x: x[0] != 'optimal', solutions)):
-        raise Exception("Could not find solutions. Please check constraints.")
+        raise NoSolutionsException("Could not find solutions. Please check constraints.")
     
     return list(map(lambda x: x[1], solutions))
