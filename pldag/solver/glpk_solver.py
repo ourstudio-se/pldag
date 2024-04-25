@@ -1,7 +1,7 @@
 import numpy as np
 import functools
 
-from . import NoSolutionsException
+from .. import NoSolutionsException
 
 try:
     import npycvx

@@ -7,6 +7,9 @@ from graphlib import TopologicalSorter
 
 from enum import Enum
 
+class NoSolutionsException(Exception):
+    pass
+
 class Solver(Enum):
     GLPK = "glpk"
 
