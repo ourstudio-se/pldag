@@ -275,7 +275,7 @@ def test_to_polyhedron():
     model.set_atleast("be", 3)
     model.set_atleast("abcd", -9)
     model.set_atmost("abcd", 5)
-    A,b,vs = model.to_polyhedron()
+    A,b = model.to_polyhedron()
     assert np.array_equal(A, np.array([
         [ 0,  1,  0,  0,  1, -3,  0,  0],
         [ 1,  1,  1,  1,  0,  0, -4,  0],
@@ -300,7 +300,7 @@ def test_to_polyhedron():
     model._set_gelineq("xa", -2, True)
     # -(+y +b -1 >= 0) becomes -x-a +0 >= 0 (at most 0)
     model._set_gelineq("yb", -1, True)
-    A,b,vs = model.to_polyhedron()
+    A,b = model.to_polyhedron()
     assert np.array_equal(
         A, 
         np.array([
@@ -315,22 +315,30 @@ def test_to_polyhedron():
     model = PLDAG()
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", 1)
-    A,b,vs = model.to_polyhedron()
+    A,b = model.to_polyhedron()
     assert np.array_equal(A, np.array([[1,1,1,-1]]))
     assert np.array_equal(b, np.array([ 0]))
-    assert len(vs) == 4
 
-    A,b,vs = model.to_polyhedron(**{a: 1, "x": 1, "y": 1, "z": 1})
+    A,b = model.to_polyhedron(**{a: 1+1j, "x": 1+1j, "y": 1+1j, "z": 1+1j})
     assert np.array_equal(A, np.array([[1,1,1,-1], [1,1,1,1]]))
     assert np.array_equal(b, np.array([ 0, 4]))
 
-    A,b,vs = model.to_polyhedron(**{a: -1, "x": -1, "y": -1, "z": -1})
+    A,b = model.to_polyhedron(**{a: -1-1j, "x": -1-1j, "y": -1-1j, "z": -1-1j})
     assert np.array_equal(A, np.array([[1,1,1,-1], [1,1,1,1]]))
     assert np.array_equal(b, np.array([ 0, -4]))
 
-    A,b,vs = model.to_polyhedron(**{a: 2, "x": 2, "y": 0, "z": 0})
-    assert np.array_equal(A, np.array([[1,1,1,-1], [1,0,0,1], [0,1,1,0]]))
-    assert np.array_equal(b, np.array([ 0, 4, 0]))
+    A,b = model.to_polyhedron(**{a: 2+2j, "x": 2+2j, "y": 0j, "z": 0j})
+    assert np.array_equal(A, np.array([[1,1,1,-1], [0,1,1,0], [1,0,0,1]]))
+    assert np.array_equal(b, np.array([ 0, 0, 4]))
+
+    model.set_primitive("x", -2+3j)
+    model.set_primitive("y", 1j)
+    A,b = model.to_polyhedron()
+    assert np.array_equal(A, np.array([[1,1,1,-3], [1,0,0,0], [-1,0,0,0]]))
+    assert np.array_equal(b, np.array([-2,-2,-3]))
+    A,b = model.to_polyhedron(**{a: 1j, "x": -1+2j, "y": -1+3j, "z": 0j})
+    assert np.array_equal(A, np.array([[1,1,1,-3], [0,0,1,0], [1,0,0,0], [-1,0,0,0]]))
+    assert np.array_equal(b, np.array([-2,0,-1,-3]))
 
 def test_logical_operators():
 

@@ -1,6 +1,6 @@
 import numpy as np
 from hashlib import sha1
-from itertools import groupby, repeat
+from itertools import groupby, repeat, starmap
 from functools import partial, lru_cache
 from typing import Dict, List, Set, Optional
 from graphlib import TopologicalSorter
@@ -42,7 +42,7 @@ class PLDAG:
         return hash(self.sha1())
     
     def sha1(self) -> str:
-        return sha1("".join(self._imap.keys()).encode()).hexdigest()
+        return sha1(("".join(self._imap.keys()) + "".join(map(lambda c: f"{c.real}{c.imag}", self._dvec))).encode()).hexdigest()
 
     @property
     def bounds(self) -> np.ndarray:
@@ -708,7 +708,7 @@ class PLDAG:
         ], alias)
     
     @lru_cache
-    def to_polyhedron(self, **fix) -> tuple:
+    def to_polyhedron(self, **fix: Dict[str, complex]) -> tuple:
 
         """
             Constructs a polyhedron of matrix A and bias vector b,
@@ -726,7 +726,7 @@ class PLDAG:
             >>> model = PLDAG()
             >>> model.set_primitives("xyz")
             >>> a = model.set_atleast("xyz", 1)
-            >>> A,b,vs = model.to_polyhedron()
+            >>> A, b = model.to_polyhedron()
             >>> np.array_equal(A, np.array([[1,1,1,-1]]))
             True
         """
@@ -762,9 +762,21 @@ class PLDAG:
         # by the flipped minimum value
         b = eq_bounds.real - self._bvec.real
 
-        # Fix the columns in `fix`
-        for i, vs in groupby(zip(fix.values(), fix.keys()), key=lambda x: x[0]):
-            v = list(map(lambda x: x[1], vs))
+        # Fix constant variables
+        for i, vs in groupby(
+            sorted(
+                map(
+                    lambda x: (x[0], int(x[1].real)), 
+                    filter(
+                        lambda x: x[1].real == x[1].imag, 
+                        fix.items()
+                    )
+                ),
+                key=lambda x: x[1] 
+            ), 
+            key=lambda x: x[1]
+        ):
+            v = list(map(lambda x: x[0], vs))
             a = np.zeros(A.shape[1], dtype=np.int64)
             a[np.array(list(map(self._col, v)))] = 1
             if i > 0 or i < 0:
@@ -781,36 +793,37 @@ class PLDAG:
         # Declare new constraints for upper and lower bound for integer variables
         A_int = np.zeros((len(int_vars) * 2, A.shape[1]), dtype=np.int64)
         b_int = np.zeros((len(int_vars) * 2, ), dtype=np.int64)
+
+        # Setup dvec as real and imag parts
+        d_real = self._dvec.real
+        d_imag = self._dvec.imag
+
+        # Also, if fix has tighter bounds set we use them instead
+        for i, bound in filter(
+            lambda x: (x[1].real != x[1].imag), 
+            starmap(
+                lambda k,v: (self._col(k), v),
+                fix.items()
+            )
+        ):
+            if bound.real > d_real[i]:
+                d_real[i] = bound.real
+            elif bound.imag < d_imag[i]:
+                d_imag[i] = bound.imag
         
         # Lower bound for integers..
         A_int[np.arange(len(int_vars) * 2, step=2), int_vars] = 1
-        b_int[np.arange(len(int_vars) * 2, step=2)] = self._dvec[int_vars].real
+        b_int[np.arange(len(int_vars) * 2, step=2)] = d_real[int_vars]
         
         # Upper bound for integers..
         A_int[np.arange(len(int_vars) * 2, step=2) + 1, int_vars] = -1
-        b_int[np.arange(len(int_vars) * 2, step=2) + 1] = -1 * self._dvec[int_vars].imag
+        b_int[np.arange(len(int_vars) * 2, step=2) + 1] = -1 * d_imag[int_vars]
 
         # Add them onto polyhedron
         A = np.vstack([A, A_int])
         b = np.append(b, b_int)
 
-        # Reverse index map
-        rimap = dict(map(lambda x: (x[1], x[0]), self._imap.items()))
-
-        # Create the variable list
-        variables = np.array(
-            list(
-                map(
-                    lambda i: (
-                        rimap[i],
-                        self._dvec[i],
-                    ),
-                    np.array(list(self._imap.values()))
-                )
-            )
-        )
-
-        return A, b, variables
+        return A, b
     
     def _from_indices(self, row_idxs: np.ndarray, col_idxs: np.ndarray) -> 'PLDAG':
         """
@@ -891,7 +904,7 @@ class PLDAG:
         row_idxs = np.array(sorted(list(map(row_vars.index, filter(lambda v: v in self._row_vars, matching_variables)))))
         return self._from_indices(row_idxs, col_idxs)
     
-    def solve(self, objectives: List[Dict[str, int]], fix: Dict[str, int], solver: Solver) -> List[Dict[str, int]]:
+    def solve(self, objectives: List[Dict[str, int]], fix: Dict[str, complex], solver: Solver) -> List[Dict[str, complex]]:
         """
             Solves the model with the given objectives.
 
@@ -900,7 +913,7 @@ class PLDAG:
             objectives : List[Dict[str, int]]
                 The objectives to solve for.
 
-            fix : Dict[str, int]
+            fix : Dict[str, complex]
                 The variables to fix.
 
             solver : Solver
@@ -911,15 +924,16 @@ class PLDAG:
             >>> model = PLDAG()
             >>> model.set_primitives("xyz")
             >>> a = model.set_atleast("xyz", 1)
-            >>> model.solve([{"x": 0, "y": 1, "z": 0}], Solver.GLPK)
-            [{'x': 0, 'y': 1, 'z': 0}]
+            >>> model.solve([{"x": 0, "y": 1, "z": 0}], {}, Solver.GLPK)
+            [{'x': 0j, 'y': 1+1j, 'z': 0j}]
 
             Returns
             -------
-            List[Dict[str, int]]
+            List[Dict[str, complex]]
                 The solutions for the objectives.
         """
-        A, b, variables = self.to_polyhedron(**fix)
+        A, b = self.to_polyhedron(**fix)
+        variables = self._col_vars
         obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
         for i, obj in enumerate(objectives):
             obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
