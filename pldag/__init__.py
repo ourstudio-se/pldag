@@ -322,6 +322,34 @@ class PLDAG:
         """Get the bounds of the given ID(s)"""
         return self._dvec[list(map(self._col, id))]
     
+    def delete(self, id: str) -> True:
+        """
+            Delete the given ID.
+        """
+        try:
+            if id in self.composites:
+                row_id = self._row(id)
+                self._bvec = np.delete(self._bvec, row_id)
+                self._nvec = np.delete(self._nvec, row_id)
+                self._amap = dict(filter(lambda x: x[1] != id, self._amap.items()))
+                self._amat = np.delete(self._amat, row_id, axis=0)
+
+            col_id = self._col(id)
+            self._amat = np.delete(self._amat, col_id, axis=1)
+            self._dvec = np.delete(self._dvec, col_id)
+            self._cvec = np.delete(self._cvec, col_id)
+            del self._imap[id]
+            self._imap = dict(
+                zip(
+                    self._imap.keys(),
+                    range(len(self._imap))
+                )
+            )
+
+            return True
+        except:
+            return False
+    
     def exists(self, id: str) -> bool:
         """Check if the given id exists"""
         return (id in self._imap)

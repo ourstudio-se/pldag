@@ -70,6 +70,61 @@ def test_propagate():
     assert res.get(c) == 0j
     assert res.get(a) == 0j
 
+def test_delete():
+    
+    model = PLDAG()
+    model.set_primitive("x")
+    model.delete("x")
+    assert len(model.primitives) == 0
+    assert len(model._amap) == 0
+    assert len(model._imap) == 0
+    model._amat.shape == (0,0)
+    model._dvec.shape == (0,)
+
+    model.set_primitives(["x", "y", "z"])
+    model.set_atleast(["x", "y", "z"], 1)
+    model.delete("z")
+    assert len(model.primitives) == 2
+    assert len(model.composites) == 1
+    assert len(model._amap) == 0
+    assert len(model._imap) == 3
+    assert max(model._imap.values()) == 2
+    assert model._amat.shape == (1, 3)
+    assert model._dvec.shape == (3,)
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    removed_id = model.set_xor(["x", "z"])
+    affected_id = model.set_and([removed_id, model.set_xor(["x", "y"])])
+    # Deleting this one should do that the previous one
+    # could never be satisfied
+    assert model.propagate_downstream().get(affected_id) == 1j
+    model.delete(removed_id)
+    assert model.propagate_downstream().get(affected_id) == 0j
+    
+    model = PLDAG()
+    model.set_primitives("xyz")
+    removed_id1 = model.set_xor(["x", "z"])
+    removed_id2 = model.set_xor(["x", "y"])
+    affected_id = model.set_or([removed_id1, removed_id2])
+    assert model.propagate_downstream().get(affected_id) == 1j
+    model.delete(removed_id)
+    assert model.propagate_downstream().get(affected_id) == 1j
+    model.delete(removed_id2)
+    assert model.propagate_downstream().get(affected_id) == 0j
+    
+    model = PLDAG()
+    model.set_primitives("xyz")
+    removed_id1 = model.set_xor(["x", "z"])
+    removed_id2 = model.set_xor(["x", "y"])
+    affected_id = model.set_atmost([removed_id1, removed_id2], 1)
+    assert model.propagate_downstream().get(affected_id) == 1j
+    model.delete(removed_id)
+    assert model.propagate_downstream().get(affected_id) == 1+1j
+    model.delete(removed_id2)
+    assert model.propagate_downstream().get(affected_id) == 1+1j
+
+
 def test_integer_bounds():
 
     model = PLDAG()
