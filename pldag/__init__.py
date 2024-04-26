@@ -948,7 +948,7 @@ class PLDAG:
             map(
                 lambda solution: dict(
                     zip(
-                        variables.T[0], 
+                        variables, 
                         map(
                             lambda i: complex(i,i),
                             solution
