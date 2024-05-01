@@ -70,7 +70,7 @@ class PLDAG:
         """
             Create a composite ID from a list of children.
         """
-        return sha1(("".join(sorted(set(children))) + str(negate) + str(bias)).encode()).hexdigest()
+        return sha1(("".join(map(lambda x: sha1(x.encode()).hexdigest(), sorted(set(children)))) + str(negate) + str(bias)).encode()).hexdigest()
     
     @property
     def primitives(self) -> np.ndarray:
@@ -708,7 +708,7 @@ class PLDAG:
         ], alias)
     
     @lru_cache
-    def to_polyhedron(self, **fix: Dict[str, complex]) -> tuple:
+    def to_polyhedron(self, double_binding: bool = True, **assume: Dict[str, complex]) -> tuple:
 
         """
             Constructs a polyhedron of matrix A and bias vector b,
@@ -718,8 +718,8 @@ class PLDAG:
 
             Parameters
             ----------
-            fix : Dict[str, int]
-                A dictionary of variables to fix.
+            assume : Dict[str, int]
+                A dictionary of variables to assume tighter bounds.
 
             Examples
             --------
@@ -731,36 +731,70 @@ class PLDAG:
             True
         """
 
+        # From a aux variable A such that A <-> X, and the constraint X: c*x + c*y + c*z >= d, where n is the number of terms on left hand side, we have the following constraints:
+        # `mx` is the maximum sum over the inner variables in a constraint X.
+        # For atleast constraints:
+        # 1) -dA + sum(+X) >= ±0             (-A v +X)
+        # 2) +mx*A + sum(-X) >= -(d-1)       (+A v -X)
+
+        # For atmost constraints:
+        # 1) (-mx-d)A + sum(-X) >= -mx       (-A v +X)
+        # 2) (-d+mn+1)A + sum(+X) >= (-d+1)     (+A v -X)
+
         # Create the matrix
-        A = np.zeros(self._amat.shape, dtype=np.int64)
+        A = np.zeros((self._amat.shape[0] * 2, self._amat.shape[1]), dtype=np.int64)
+        b = np.zeros(self._amat.shape[0] * 2, dtype=np.int64)
+
+        # Find max of inner bounds for each composite
+        ad = self._amat.dot(self._dvec)
+        mn = ad.real
+        mx = ad.imag
+
+        # Extract `d` vector from bias
+        d = -1 * self._bvec.real
 
         # Adjacent points
         adj_points = np.argwhere(self._amat == 1)
 
-        # Fill the matrix
-        A[adj_points.T[0], adj_points.T[1]] = 1
+        # A -> X row indices
+        A_X_ri = adj_points.T[0]
+        A_X = np.unique(A_X_ri)
+        # X -> A row indices
+        X_A_ri = adj_points.T[0] + adj_points.T[0].max() + 1
+        X_A = np.unique(X_A_ri)
 
-        # Flip the once that are negated
-        A[self._nvec == 1] *= -1
+        # Fill the matrix with adjacency points
+        A[A_X_ri, adj_points.T[1]] = -1
+        A[X_A_ri, adj_points.T[1]] = -1
+
+        # Assign 1 instead of -1 to the at least A -> X, and at most constraints for X -> A.
+        A[A_X[~self._nvec], :] *= -1
+        A[X_A[self._nvec], :] *= -1
 
         # Composite index in matrix
         cidx = np.array(list(self._imap.values()))[self._cvec]
 
-        # Fetch the inner bounds
-        inner_bounds = self._amat.dot(self._dvec)
+        # Set coef and bias for at least aux variable A->X
+        # 1) (-d+mn)A + sum(-X) >= mn            (-A v +X)
+        A[A_X[~self._nvec], cidx[~self._nvec]] = -d[~self._nvec]+mn[~self._nvec]
+        b[A_X[~self._nvec]] = mn[~self._nvec]
 
-        # Flip those that are negated
-        inner_bounds[self._nvec == 1] = np.conj(inner_bounds[self._nvec == 1]) * -1j
+        # Set coef and bias for at least aux var X->A
+        # 2) +mx*A + sum(-X) >= -(d-1)       (+A v -X)
+        if double_binding:
+            A[X_A[~self._nvec], cidx[~self._nvec]] = mx[~self._nvec]-(d[~self._nvec] - 1)
+            b[X_A[~self._nvec]] = -(d[~self._nvec] - 1)
 
-        # Add onto bias so the bounds are correct
-        eq_bounds = inner_bounds + self._bvec
+        # Set coef and bias for at most aux variable A->X
+        # 1) (-mx-d)A + sum(-X) >= -mx       (-A v +X)
+        A[A_X[self._nvec], cidx[self._nvec]] = -mx[self._nvec] - d[self._nvec]
+        b[A_X[self._nvec]] = -mx[self._nvec]
 
-        # Fill the composite id's with the mx value
-        A[range(A.shape[0]), cidx] = eq_bounds.real
-
-        # Create the bias vector. The linear equation should be increased
-        # by the flipped minimum value
-        b = eq_bounds.real - self._bvec.real
+        # Set coef and bias for at most aux var X->A
+        # 2) (-d-mn+1)A + sum(+X) >= (-d+1)     (+A v -X)
+        if double_binding:
+            A[X_A[self._nvec], cidx[self._nvec]] = -d[self._nvec] + 1 - mn[self._nvec]
+            b[X_A[self._nvec]] = -d[self._nvec] + 1
 
         # Fix constant variables
         for i, vs in groupby(
@@ -769,7 +803,7 @@ class PLDAG:
                     lambda x: (x[0], int(x[1].real)), 
                     filter(
                         lambda x: x[1].real == x[1].imag, 
-                        fix.items()
+                        assume.items()
                     )
                 ),
                 key=lambda x: x[1] 
@@ -803,7 +837,7 @@ class PLDAG:
             lambda x: (x[1].real != x[1].imag), 
             starmap(
                 lambda k,v: (self._col(k), v),
-                fix.items()
+                assume.items()
             )
         ):
             if bound.real > d_real[i]:
@@ -904,7 +938,7 @@ class PLDAG:
         row_idxs = np.array(sorted(list(map(row_vars.index, filter(lambda v: v in self._row_vars, matching_variables)))))
         return self._from_indices(row_idxs, col_idxs)
     
-    def solve(self, objectives: List[Dict[str, int]], fix: Dict[str, complex], solver: Solver) -> List[Dict[str, complex]]:
+    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver) -> List[Dict[str, complex]]:
         """
             Solves the model with the given objectives.
 
@@ -913,8 +947,8 @@ class PLDAG:
             objectives : List[Dict[str, int]]
                 The objectives to solve for.
 
-            fix : Dict[str, complex]
-                The variables to fix.
+            assume : Dict[str, complex]
+                Assume new bounds for variables.
 
             solver : Solver
                 The solver to use.
@@ -932,7 +966,7 @@ class PLDAG:
             List[Dict[str, complex]]
                 The solutions for the objectives.
         """
-        A, b = self.to_polyhedron(**fix)
+        A, b = self.to_polyhedron(**assume)
         variables = self._col_vars
         obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
         for i, obj in enumerate(objectives):

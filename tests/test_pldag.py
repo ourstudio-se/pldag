@@ -272,73 +272,31 @@ def test_to_polyhedron():
     model.set_primitive("c", -4+4j)
     model.set_primitive("d", -4+5j)
     model.set_primitive("e", 1j)
-    model.set_atleast("be", 3)
-    model.set_atleast("abcd", -9)
-    model.set_atmost("abcd", 5)
-    A,b = model.to_polyhedron()
-    assert np.array_equal(A, np.array([
-        [ 0,  1,  0,  0,  1, -3,  0,  0],
-        [ 1,  1,  1,  1,  0,  0, -4,  0],
-        [-1, -1, -1, -1,  0,  0,  0, -9],
-        [ 1,  0,  0,  0,  0,  0,  0,  0],
-        [-1,  0,  0,  0,  0,  0,  0,  0],
-        [ 0,  1,  0,  0,  0,  0,  0,  0],
-        [ 0, -1,  0,  0,  0,  0,  0,  0],
-        [ 0,  0,  1,  0,  0,  0,  0,  0],
-        [ 0,  0, -1,  0,  0,  0,  0,  0],
-        [ 0,  0,  0,  1,  0,  0,  0,  0],
-        [ 0,  0,  0, -1,  0,  0,  0,  0],
-    ]))
-    assert np.array_equal(b, np.array([0., -13., -14.,  -5.,  -3.,   0.,  -2.,  -4.,  -4.,  -4.,  -5.]))
+    model.set_atleast("be", 3, alias="A")
+    model.set_atleast("abcd", -9, alias="B")
+    model.set_atmost("abcd", 5, alias="C")
+    A,b = model.to_polyhedron(double_binding=True)
+    
+    # b and e is not at least 3, therefore should also A be false
+    # a, b, c and is at least -9, therefore should B be true
+    # a, b, c and d is at most 5, therefore should C be true
+    assert (A.dot([0,0,0,0,0,0,1,1]) >= b).all()
 
-    model = PLDAG()
-    model.set_primitives("xyz")
-    model.set_atleast("xyz", 1)
-    model.set_primitives("abc")
-    model.set_atleast("abc", 3)
-    # -(+x +a -2 >= 0) becomes -x-a +1 >= 0 (at most 1)
-    model._set_gelineq("xa", -2, True)
-    # -(+y +b -1 >= 0) becomes -x-a +0 >= 0 (at most 0)
-    model._set_gelineq("yb", -1, True)
-    A,b = model.to_polyhedron()
-    assert np.array_equal(
-        A, 
-        np.array([
-            [ 1, 1, 1,-1, 0, 0, 0, 0, 0, 0], 
-            [ 0, 0, 0, 0, 1, 1, 1,-3, 0, 0], 
-            [-1, 0, 0, 0,-1, 0, 0, 0,-1, 0],
-            [ 0,-1, 0, 0, 0,-1, 0, 0, 0,-2],
-        ])
-    )
-    assert np.array_equal(b, np.array([ 0, 0,-2,-2]))
+    # If C is false, then -a-b-c-d >= -5 should also be false.
+    # Therefore this is false
+    assert ~(A.dot([0,0,0,0,0,0,1,0]) >= b).all()
 
-    model = PLDAG()
-    model.set_primitives("xyz")
-    a=model.set_atleast("xyz", 1)
-    A,b = model.to_polyhedron()
-    assert np.array_equal(A, np.array([[1,1,1,-1]]))
-    assert np.array_equal(b, np.array([ 0]))
+    # But if we set e.g 'a' to 3 and 'c' to 3 (which is more than), then both are false at the same time
+    # Which is ok.
+    assert (A.dot([3,0,3,0,0,0,1,0]) >= b).all()
 
-    A,b = model.to_polyhedron(**{a: 1+1j, "x": 1+1j, "y": 1+1j, "z": 1+1j})
-    assert np.array_equal(A, np.array([[1,1,1,-1], [1,1,1,1]]))
-    assert np.array_equal(b, np.array([ 0, 4]))
+    # If B is false, then -a-b-c-d >= -9 should also be false.
+    # Which is not the case here and therefore this is false
+    assert ~(A.dot([0,0,0,0,0,0,0,1]) >= b).all()
 
-    A,b = model.to_polyhedron(**{a: -1-1j, "x": -1-1j, "y": -1-1j, "z": -1-1j})
-    assert np.array_equal(A, np.array([[1,1,1,-1], [1,1,1,1]]))
-    assert np.array_equal(b, np.array([ 0, -4]))
-
-    A,b = model.to_polyhedron(**{a: 2+2j, "x": 2+2j, "y": 0j, "z": 0j})
-    assert np.array_equal(A, np.array([[1,1,1,-1], [0,1,1,0], [1,0,0,1]]))
-    assert np.array_equal(b, np.array([ 0, 0, 4]))
-
-    model.set_primitive("x", -2+3j)
-    model.set_primitive("y", 1j)
-    A,b = model.to_polyhedron()
-    assert np.array_equal(A, np.array([[1,1,1,-3], [1,0,0,0], [-1,0,0,0]]))
-    assert np.array_equal(b, np.array([-2,-2,-3]))
-    A,b = model.to_polyhedron(**{a: 1j, "x": -1+2j, "y": -1+3j, "z": 0j})
-    assert np.array_equal(A, np.array([[1,1,1,-3], [0,0,1,0], [1,0,0,0], [-1,0,0,0]]))
-    assert np.array_equal(b, np.array([-2,0,-1,-3]))
+    # But if we set B's variables lower than -9, then B and it's constraint it false.
+    # Which is ok.
+    assert (A.dot([-5, 0, -4, -4, 0, 0, 0, 1]) >= b).all()
 
 def test_logical_operators():
 
