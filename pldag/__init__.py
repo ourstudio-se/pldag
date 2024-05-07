@@ -369,7 +369,7 @@ class PLDAG:
         """Get the negated state of the given id"""
         return bool(self._nvec[self._row(id)])
 
-    def propagate_downstream(self, query: dict = {}, freeze: bool = True) -> dict:
+    def propagate(self, query: dict = {}, freeze: bool = True) -> dict:
         """
             Propagates the graph downstream, towards the root node(s), and returns the propagated bounds.
 
@@ -644,6 +644,30 @@ class PLDAG:
             self.set_atmost(references, 1),
         ], alias)
     
+    def set_xnor(self, references: List[str], alias: Optional[str] = None) -> str:
+        """
+            Add a composite constraint of an XNOR operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_xnor(["x", "y"])
+            >>> model.test({"x": 1+1j, "y": 0j}).get(a)
+            0j
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self.set_not([self.set_xor(references)], alias)
+    
     def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of an IMPLY operation.
@@ -686,23 +710,12 @@ class PLDAG:
             references : List[str]
                 The references to composite constraints or primitive variables.
 
-            Examples
-            --------
-            >>> model = PLDAG()
-            >>> model.set_primitives("xy")
-            >>> a = model.set_equal("x", "y")
-            >>> model.test({"x": 1j, "y": 1j}).get(a)
-            1j
-
-            >>> model.test({"x": 1+1j, "y": 0j}).get(a)
-            0j
-
             Returns
             -------
             str
                 The ID of the composite constraint.
         """
-        return self.set_xor([
+        return self.set_or([
             self.set_and(references),
             self.set_not(references),
         ], alias)
@@ -742,8 +755,12 @@ class PLDAG:
         # 2) (-d+mn+1)A + sum(+X) >= (-d+1)     (+A v -X)
 
         # Create the matrix
-        A = np.zeros((self._amat.shape[0] * 2, self._amat.shape[1]), dtype=np.int64)
-        b = np.zeros(self._amat.shape[0] * 2, dtype=np.int64)
+        if double_binding:
+            A = np.zeros((self._amat.shape[0] * 2, self._amat.shape[1]), dtype=np.int64)
+            b = np.zeros(self._amat.shape[0] * 2, dtype=np.int64)
+        else:
+            A = np.zeros(self._amat.shape, dtype=np.int64)
+            b = np.zeros(self._amat.shape[0], dtype=np.int64)
 
         # Find max of inner bounds for each composite
         ad = self._amat.dot(self._dvec)
@@ -765,11 +782,13 @@ class PLDAG:
 
         # Fill the matrix with adjacency points
         A[A_X_ri, adj_points.T[1]] = -1
-        A[X_A_ri, adj_points.T[1]] = -1
+        if double_binding:
+            A[X_A_ri, adj_points.T[1]] = -1
 
         # Assign 1 instead of -1 to the at least A -> X, and at most constraints for X -> A.
         A[A_X[~self._nvec], :] *= -1
-        A[X_A[self._nvec], :] *= -1
+        if double_binding:
+            A[X_A[self._nvec], :] *= -1
 
         # Composite index in matrix
         cidx = np.array(list(self._imap.values()))[self._cvec]
@@ -966,7 +985,7 @@ class PLDAG:
             List[Dict[str, complex]]
                 The solutions for the objectives.
         """
-        A, b = self.to_polyhedron(**assume)
+        A, b = self.to_polyhedron(double_binding=True, **assume)
         variables = self._col_vars
         obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
         for i, obj in enumerate(objectives):

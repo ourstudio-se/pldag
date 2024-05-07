@@ -27,13 +27,13 @@ assert id_ref == id_ref_again
 
 # So if we check when all x, y and z are set to 1, then we
 # expect `id_ref` to be 1+1j
-assert model.test({"x": 1+1j, "y": 1+1j, "z": 1+1j}).get(id_ref) == 1+1j
+assert model.propagate({"x": 1+1j, "y": 1+1j, "z": 1+1j}).get(id_ref) == 1+1j
 
 # And then not all are set, we'll get just 1j (meaning the model doesn't now whether it's true or false)
-assert model.test({"x": 1+1j, "y": 1+1j, "z": 1j}).get(id_ref) == 1j
+assert model.propagate({"x": 1+1j, "y": 1+1j, "z": 1j}).get(id_ref) == 1j
 
 # However, if we now that any variable is not set, being equal to 0, then the model know the composite to be false (or 0j)
-assert model.test({"x": 1+1j, "y": 1+1j, "z": 0j}).get(id_ref) == 0j
+assert model.propagate({"x": 1+1j, "y": 1+1j, "z": 0j}).get(id_ref) == 0j
 ```
 
 There's also a quick way to use a solver. There's no built-in solver but is dependent on existing once. Before using, reinstall the package with the solver variable set to the solver you'd want to use
@@ -46,7 +46,7 @@ And then you can use it like following
 from pldag import Solver
 
 # Maximize [x=1, y=0, z=0] such that rules in model holds and variable `id_ref` must be true.
-solution = next(iter(model.solve(objectives=[{"x": 1}], fix={id_ref: 1}, solver=Solver.GLPK)))
+solution = next(iter(model.solve(objectives=[{"x": 1}], assume={id_ref: 1+1j}, solver=Solver.GLPK)))
 
 # Since x=1 and `id_ref` must be set (i.e. all(x,y,z) must be true), we could expect all variables
 # be set.
