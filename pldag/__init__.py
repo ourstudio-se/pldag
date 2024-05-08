@@ -773,12 +773,16 @@ class PLDAG:
         # Adjacent points
         adj_points = np.argwhere(self._amat == 1)
 
+        # If no adjacent points, return empty matrix
+        if adj_points.size == 0:
+            return np.zeros((0, self._amat.shape[1]), dtype=np.int64), np.zeros(0, dtype=np.int64)
+
         # A -> X row indices
         A_X_ri = adj_points.T[0]
-        A_X = np.unique(A_X_ri)
+        A_X = np.arange(self._amat.shape[0])
         # X -> A row indices
-        X_A_ri = adj_points.T[0] + adj_points.T[0].max() + 1
-        X_A = np.unique(X_A_ri)
+        X_A = A_X + A_X.max() + 1
+        X_A_ri = adj_points.T[0] + A_X.max() + 1
 
         # Fill the matrix with adjacency points
         A[A_X_ri, adj_points.T[1]] = -1

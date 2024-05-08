@@ -298,6 +298,35 @@ def test_to_polyhedron():
     # Which is ok.
     assert (A.dot([-5, 0, -4, -4, 0, 0, 0, 1]) >= b).all()
 
+    # Test if there's a 0-reference proposition, to_polyhedron should return an empty polyhedron
+    model = PLDAG()
+    model.set_atleast([], 1)
+    A,b = model.to_polyhedron(double_binding=True)
+    assert A.shape == (0, 1)
+    assert b.shape == (0,)
+    
+    model = PLDAG()
+    model.set_primitives("abc")
+    model.set_atleast([], 1)
+    A,b = model.to_polyhedron(double_binding=True)
+    assert A.shape == (0, 4)
+    assert b.shape == (0,)
+    
+    model = PLDAG()
+    model.set_primitives("abc")
+    # Keep an eye on this one
+    a = model.set_atleast(["a","b"], 1)
+    model.set_atleast(["b","c"], 1)
+    # We simulate to set `a` to have 0-references
+    model._amat[0] = 0
+    A,b = model.to_polyhedron(double_binding=False)
+    # We should still have a propert polyhedron
+    assert A.shape == (2, 5)
+    assert b.shape == (2,)
+    # But the first one, or `a`, should forbid `a`
+    assert A[model._row(a), model._col(a)] == -1
+    assert b[model._row(a)] == 0
+
 def test_logical_operators():
 
     model = PLDAG()
