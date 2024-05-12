@@ -24,7 +24,9 @@ class PLDAG:
 
     def __init__(self):
         # Adjacency matrix. Each entry is a boolean (0/1) indicating if there is a dependency
-        self._amat = np.zeros((0, 0),   dtype=np.uint8)
+        self._amat = np.zeros((0, 0),   dtype=np.int64)
+        # Weight matrix. Each entry is a weight on the dependency
+        self._wmat = np.zeros((0, 0),   dtype=np.int64)
         # Boolean vector indicating if negated
         self._nvec = np.zeros((0, ),    dtype=bool)
         # Complex vector representing bounds of complex number data type
@@ -146,14 +148,20 @@ class PLDAG:
         """
         return self.composites.tolist().index(id)
     
-    def _set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> str:
+    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None, weights: Optional[List[int]] = None) -> str:
         """
             Add a composite constraint of at least `value`.
         """
         _id = self._composite_id(children, bias, negate)
         if not _id in self._imap:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            self._amat[-1, [self._col(child) for child in children]] = 1
+            if weights:
+                if not len(weights) == len(children):
+                    raise ValueError("Weights must be the same length as children.")
+                self._amat[-1, [self._col(child) for child in children]] = weights
+            else:
+                self._amat[-1, [self._col(child) for child in children]] = 1
+
             self._dvec = np.append(self._dvec, complex(0, 1))
             self._bvec = np.append(self._bvec, complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2)))
             self._nvec = np.append(self._nvec, negate)
@@ -185,7 +193,7 @@ class PLDAG:
         #    Then we can assume each variable's bound in the composite to be their constant lower bound. I.e. set their variables upper bound to their lower bound.
         #    For instance, [0 0](A) = [0 1](x) + [0 1](y) + [0 1](z) - [1 1] >= 0 has an inner bound of [0 1]+[0 1]+[0 1]-[1 1] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
         #    Or, [0 0] = [-1 0](x) + [-1 0](y) + [-1 0](z) + 2 >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0]+[2 2] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
-        _A = np.vstack((np.zeros((A.shape[1]-A.shape[0], A.shape[1]), dtype=np.uint8), A))
+        _A = np.vstack((np.zeros((A.shape[1]-A.shape[0], A.shape[1]), dtype=np.int64), A))
         _B = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=complex), B)
         _F = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=bool), F)
         _fixed = fixed | (D.real == D.imag)
@@ -453,7 +461,8 @@ class PLDAG:
             # Update value if already in map
             self._dvec[self._col(id)] = bound
         else:
-            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.uint8)))
+            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.int64)))
+            self._wmat = np.hstack((self._wmat, np.zeros((self._wmat.shape[0], 1), dtype=np.int64)))
             self._dvec = np.append(self._dvec, bound)
             self._cvec = np.append(self._cvec, False)
             self._imap[id] = self._amat.shape[1] - 1
@@ -491,7 +500,7 @@ class PLDAG:
             self.set_primitive(id, bound)
         return ids
     
-    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
+    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, weights: Optional[List[int]] = None) -> str:
         """
             Add a composite constraint of at least `value`.
 
@@ -516,9 +525,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self._set_gelineq(references, -1 * value, False, alias)
+        return self.set_gelineq(references, -1 * value, False, alias, weights)
     
-    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
+    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, weights: Optional[List[int]] = None) -> str:
         """
             Add a composite constraint of at most `value`.
 
@@ -543,7 +552,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self._set_gelineq(references, -1 * (value + 1), True, alias)
+        return self.set_gelineq(references, -1 * (value + 1), True, alias, weights)
     
     def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
         """
@@ -771,7 +780,7 @@ class PLDAG:
         d = -1 * self._bvec.real
 
         # Adjacent points
-        adj_points = np.argwhere(self._amat == 1)
+        adj_points = np.argwhere(self._amat != 0)
 
         # If no adjacent points, return empty matrix
         if adj_points.size == 0:
@@ -785,9 +794,9 @@ class PLDAG:
         X_A_ri = adj_points.T[0] + A_X.max() + 1
 
         # Fill the matrix with adjacency points
-        A[A_X_ri, adj_points.T[1]] = -1
+        A[A_X_ri, adj_points.T[1]] = -self._amat[A_X_ri, adj_points.T[1]]
         if double_binding:
-            A[X_A_ri, adj_points.T[1]] = -1
+            A[X_A_ri, adj_points.T[1]] = -self._amat[A_X_ri, adj_points.T[1]]
 
         # Assign 1 instead of -1 to the at least A -> X, and at most constraints for X -> A.
         A[A_X[~self._nvec], :] *= -1
