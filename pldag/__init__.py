@@ -326,6 +326,19 @@ class PLDAG:
             )
         )
     
+    def copy(self) -> "PLDAG":
+        """Copy the model"""
+        model = PLDAG()
+        model._amat = self._amat.copy()
+        model._wmat = self._wmat.copy()
+        model._dvec = self._dvec.copy()
+        model._bvec = self._bvec.copy()
+        model._nvec = self._nvec.copy()
+        model._cvec = self._cvec.copy()
+        model._imap = self._imap.copy()
+        model._amap = self._amap.copy()
+        return model
+    
     def get(self, *id: str) -> np.ndarray:
         """Get the bounds of the given ID(s)"""
         return self._dvec[list(map(self._col, id))]
@@ -924,16 +937,22 @@ class PLDAG:
         sub_model._bvec = self._bvec[row_idxs]
         sub_model._cvec = self._cvec[col_idxs]
         sub_model._imap = dict(map(lambda x: (x[1], x[0]), enumerate(self._col_vars[col_idxs])))
+        sub_model._amap = dict(filter(lambda x: x[1] in sub_model._imap, self._amap.items()))
         return sub_model
     
-    def sub(self, ids: List[str]) -> 'PLDAG':
+    def sub(self, roots: List[str], max_iterations: int = 1000) -> 'PLDAG':
         """
-            Create a sub-PLDAG from the given IDs.
+            Create a sub-PLDAG from the given root IDs.
+            
+            NOTE: This function works recursively to find all roots that eventually will be reached from any of the id's in `ids`. 
+            Therefore we have a maximum number of iterations to avoid infinite loops.
 
             Parameters
             ----------
-            ids : List[str]
-                The IDs to include in the sub PLDAG.
+            roots : List[str]
+                The IDs to use as roots in the new sub PLDAG.
+
+            cuts : List[Dict]
 
             Examples
             --------
@@ -950,25 +969,75 @@ class PLDAG:
                 The sub-PLDAG.
         """
 
-        col_vars = self._col_vars.tolist()
-        row_vars = self._row_vars.tolist()
-
-        def incoming_edges(idlist: List[int]) -> Set[int]:
-            return set(self._col_vars[np.argwhere(self._amat[list(map(row_vars.index, filter(lambda v: v in row_vars, idlist)))]).T[1]].tolist())
-        
         # First find all variables (columns and rows)
-        # that eventually reaches any of the id's in `ids`
-        max_iterations: int = 100
-        matching_variables = incoming_edges(set(ids)).union(set(ids))
-        for _ in range(max_iterations):
-            new_matching_variables = incoming_edges(matching_variables)
-            if new_matching_variables.issubset(matching_variables):
-                break
-            matching_variables.update(new_matching_variables)
+        # that eventually reaches any of the roots
+        adj = self.adjacency_matrix
+        idxs = list(map(self._col, filter(lambda id: id in self._imap, roots)))
+        
+        # Init by setting the given nodes
+        match_vector = np.isin(range(adj.shape[1]), idxs)
+        match_vector[idxs] = True
 
-        col_idxs = np.array(sorted(list(map(col_vars.index, matching_variables))))
-        row_idxs = np.array(sorted(list(map(row_vars.index, filter(lambda v: v in self._row_vars, matching_variables)))))
-        return self._from_indices(row_idxs, col_idxs)
+        # Find what nodes that are connected to the given nodes
+        previous_match_vector = (adj[match_vector] != 0).any(axis=0)
+
+        for _ in range(max_iterations):
+
+            # Extend the match vector with new variables found
+            match_vector |= previous_match_vector
+            
+            # Query for new variables
+            previous_match_vector = (adj[previous_match_vector] != 0).any(axis=0)
+            
+            # If no new variables are found, this is the last root
+            if (~previous_match_vector).all():
+                break
+
+        return self._from_indices(
+            list(map(self._row, filter(lambda x: x in self.composites, self.columns[match_vector]))), 
+            np.argwhere(match_vector).T[0]
+        )
+    
+    def cut(self, cuts: Dict[str, str]) -> "PLDAG":
+
+        """
+            Cuts graph on given nodes in `cuts`. The key in cuts is what node to cut,
+            the value is the new ID of the node (since it will go from a composite to a primitive).
+
+            Note. Only connections to the given nodes in cuts will be cut. If the child nodes has
+            other connections to the graph, they will still be part of the graph.
+
+            Parameters
+            ----------
+            cuts : Dict[str, str]
+                A mapping of nodes to cut to their new IDs.
+
+            Returns
+            -------
+            PLDAG
+                The cut PLDAG.
+        """
+        ids = list(filter(lambda id: id in self.rows, cuts.keys()))
+        if len(ids) == 0:
+            return self.copy()
+        ex_roots = (self._amat == 0).all(axis=0)
+        idxs = list(map(self._row, ids))
+        a = self._amat.copy()
+        a[idxs] = 0
+        sub = self._from_indices(
+            col_idxs=np.argwhere((a != 0).any(axis=0) | ex_roots).T[0],
+            row_idxs=np.argwhere((a != 0).any(axis=1)).T[0],
+        )
+        sub._cvec[list(map(sub._col, ids))] = False
+        sub._amap = dict(filter(lambda x: x[1] not in ids, sub._amap.items()))
+        sub._imap = dict(map(lambda x: (cuts.get(x[0], x[0]), x[1]), sub._imap.items()))
+        return sub
+    
+    def cut_sub(self, cuts: Dict[str, str], roots: List[str]) -> "PLDAG":
+        """
+            Cuts graph on given nodes in `cuts` and then creates a sub graph from the given root IDs.
+        """
+        return self.cut(cuts).sub(roots)
     
     def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver) -> List[Dict[str, complex]]:
         """

@@ -381,7 +381,7 @@ def test_logical_operators():
 def test_sub():
     model = PLDAG()
     model.set_primitives(["m1","m2","c1","c2","e1","e2","e3","g1","g2"])
-    sub_id = model.set_and([
+    model.set_and([
         model.set_xor(["m1","m2"]),
         model.set_xor(["c1","c2"]),
         model.set_xor(["e1","e2","e3"]),
@@ -390,9 +390,48 @@ def test_sub():
         model.set_imply(model.set_or(["e1", "e2"]), "g1"),
         model.set_imply("e3", "g2"),
     ])
-    not_included = [model.set_and(["m1", "e1"]), model.set_and(["m2", "e2"])]
-    sub_model = model.sub([sub_id])
-    assert all(map(lambda id: id not in sub_model._imap, not_included))
+    sub_model = model.sub([model.set_xor(["m1","m2"])])
+    expected_included = ["m1", "m2", model.set_or(["m1", "m2"]), model.set_atmost(["m1", "m2"], 1), model.set_xor(["m1", "m2"])]
+    assert all(map(lambda id: id in sub_model._imap, expected_included))
+    assert all(map(lambda x: x not in sub_model._imap, set(model.columns) - set(expected_included)))
+
+def test_cut():
+    model = PLDAG()
+    model.set_primitives(["x", "y", "z"])
+    main = model.set_or([
+        model.set_and(["x", "y"], alias="A"),
+        model.set_and(["x", "z"], alias="B"),
+    ])
+    sub = model.cut({model.id_from_alias("A"): "A"})
+    assert "x" in sub.primitives
+    assert "y" not in sub.primitives
+    assert "z" in sub.primitives
+    assert "A" in sub.primitives
+
+    # Should not work to cut a primitive
+    sub = model.cut({"x": "y"})
+    assert "x" in sub.primitives
+
+    sub = model.cut({model.id_from_alias("A"): "A", model.id_from_alias("B"): "B"})
+    assert "x" not in sub.primitives
+    assert "y" not in sub.primitives
+    assert "z" not in sub.primitives
+    assert "A" in sub.primitives
+    assert "B" in sub.primitives
+    sub.propagate({}).get(main) == 1j
+    sub.propagate({"A": 1+1j}).get(main) == 1+1j
+    
+    model = PLDAG()
+    model.set_primitives(["x", "y", "z"])
+    A = model.set_and(["x", "y"])
+    B = model.set_and(["x", "z"])
+    main = model.set_or([A, B])
+    sub = model.cut({A: A, B: B})
+    assert A in sub.primitives
+    assert B in sub.primitives
+    assert "x" not in sub.primitives
+    assert "y" not in sub.primitives
+    assert "z" not in sub.primitives
 
 def test_propagate_upstream():
 
