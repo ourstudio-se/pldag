@@ -1051,7 +1051,7 @@ class PLDAG:
         """
         return self.cut(cuts).sub(roots)
     
-    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver) -> List[Dict[str, complex]]:
+    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True) -> List[Dict[str, complex]]:
         """
             Solves the model with the given objectives.
 
@@ -1066,6 +1066,12 @@ class PLDAG:
             solver : Solver
                 The solver to use.
 
+            double_bind_constraints: bool = True
+                If the constraints should be double binded. That is, a constraint A -> x & y & z will become two constraints:
+                1 ) -dA + x + y + z >= 0
+                2 ) +mA - x - y - z >= -1
+                Saying that if A is 1 then x, y and z must be 1, and if A is 0 then x, y and z must be 0.
+
             Examples
             --------
             >>> model = PLDAG()
@@ -1079,7 +1085,7 @@ class PLDAG:
             List[Dict[str, complex]]
                 The solutions for the objectives.
         """
-        A, b = self.to_polyhedron(double_binding=True, **assume)
+        A, b = self.to_polyhedron(double_binding=double_bind_constraints, **assume)
         variables = self._col_vars
         obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
         for i, obj in enumerate(objectives):
@@ -1221,7 +1227,7 @@ class Puan(PLDAG):
             )
         )
     
-    def solve(self, objectives: List[dict], assume: Dict[str, complex], solver: Solver) -> List[dict]:
+    def solve(self, objectives: List[dict], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True) -> List[dict]:
         return list(
             map(
                 lambda solution: Solution(
@@ -1232,7 +1238,7 @@ class Puan(PLDAG):
                         )
                     )
                 ),
-                super().solve(objectives, assume, solver)
+                super().solve(objectives, assume, solver, double_bind_constraints)
             )
         )
     
