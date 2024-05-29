@@ -43,6 +43,17 @@ class PLDAG:
     def __hash__(self) -> int:
         return hash(self.sha1())
     
+    def __eq__(self, other: "PLDAG") -> bool:
+        return (self.sha1() == other.sha1()
+                and np.array_equal(self._amat, other._amat)
+                and np.array_equal(self._wmat, other._wmat)
+                and np.array_equal(self._nvec, other._nvec)
+                and np.array_equal(self._dvec, other._dvec)
+                and np.array_equal(self._bvec, other._bvec)
+                and np.array_equal(self._cvec, other._cvec)
+                and self._imap == other._imap
+                and self._amap == other._amap)
+
     def sha1(self) -> str:
         return sha1(("".join(self._imap.keys()) + "".join(map(lambda c: f"{c.real}{c.imag}", self._dvec))).encode()).hexdigest()
 
@@ -1257,4 +1268,3 @@ class Puan(PLDAG):
         new_model = self.from_super(super().cut(cuts))
         new_model.data = dict(filter(lambda k: k[0] in new_model._imap, self.data))
         return new_model
-    
