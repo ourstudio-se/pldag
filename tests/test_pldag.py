@@ -80,6 +80,15 @@ def test_delete():
     assert len(model._imap) == 0
     model._amat.shape == (0,0)
     model._dvec.shape == (0,)
+    
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.delete(*"xyz")
+    assert len(model.primitives) == 0
+    assert len(model._amap) == 0
+    assert len(model._imap) == 0
+    model._amat.shape == (0,0)
+    model._dvec.shape == (0,)
 
     model.set_primitives(["x", "y", "z"])
     model.set_atleast(["x", "y", "z"], 1)
@@ -123,6 +132,7 @@ def test_delete():
     assert model.propagate().get(affected_id) == 1+1j
     model.delete(removed_id2)
     assert model.propagate().get(affected_id) == 1+1j
+
 
 
 def test_integer_bounds():

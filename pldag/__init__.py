@@ -355,10 +355,13 @@ class PLDAG:
         """Get the bounds of the given ID(s)"""
         return self._dvec[list(map(self._col, id))]
     
-    def delete(self, id: str) -> True:
+    def delete(self, *id: str) -> bool:
         """
             Delete the given ID.
         """
+        if len(id)>1:
+            return tuple(map(self.delete, id))
+        id = id[0]
         try:
             if id in self.composites:
                 row_id = self._row(id)
