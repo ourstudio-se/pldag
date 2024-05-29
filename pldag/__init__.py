@@ -944,6 +944,7 @@ class PLDAG:
         """
         sub_model = PLDAG()
         sub_model._amat = self._amat[row_idxs][:, col_idxs]
+        sub_model._wmat = self._wmat[row_idxs][:, col_idxs]
         sub_model._nvec = self._nvec[row_idxs]
         sub_model._dvec = self._dvec[col_idxs]
         sub_model._bvec = self._bvec[row_idxs]
@@ -1147,6 +1148,19 @@ class Puan(PLDAG):
     def __init__(self):
         super().__init__()
         self.data: dict = {}
+
+    def copy(self) -> "Puan":
+        new_model = Puan()
+        new_model._amat = self._amat.copy()
+        new_model._wmat = self._wmat.copy()
+        new_model._dvec = self._dvec.copy()
+        new_model._bvec = self._bvec.copy()
+        new_model._nvec = self._nvec.copy()
+        new_model._cvec = self._cvec.copy()
+        new_model._imap = self._imap.copy()
+        new_model._amap = self._amap.copy()
+        new_model.data = self.data.copy()
+        return new_model
 
     def set_meta(self, id: str, props: dict):
         self.data.setdefault(id, {}).update(props)
