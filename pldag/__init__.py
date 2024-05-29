@@ -360,7 +360,7 @@ class PLDAG:
             Delete the given ID.
         """
         if len(id)>1:
-            return tuple(map(self.delete, id))
+            return list(map(self.delete, id))
         id = id[0]
         try:
             if id in self.composites:
