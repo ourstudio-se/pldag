@@ -1286,5 +1286,5 @@ class Puan(PLDAG):
         
     def cut(self, cuts: Dict[str, str]) -> "Puan":
         new_model = self.from_super(super().cut(cuts))
-        new_model.data = dict(filter(lambda k: k[0] in new_model._imap, self.data))
+        new_model.data = dict(filter(lambda k: k[0] in new_model._imap, self.data.items()))
         return new_model
