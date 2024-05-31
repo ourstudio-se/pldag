@@ -8,7 +8,7 @@ try:
 except ImportError:
     raise ImportError("Please install the npycvx package to use GLPK solver module.")
 
-def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=set()):
+def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=set(), minimize: bool=True):
     """
     Solve the linear programming problem:
     minimize c^T x
@@ -22,7 +22,7 @@ def solve_lp(A: np.ndarray, b: np.ndarray, objectives: np.ndarray, int_vrs: set=
     solve_part_fn = functools.partial(
         npycvx.solve_lp, 
         *npycvx.convert_numpy(A, b, int_vrs=int_vrs), 
-        False
+        minimize
     )
 
     # Exectue each objective with solver function
