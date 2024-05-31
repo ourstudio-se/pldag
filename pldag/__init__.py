@@ -1244,7 +1244,7 @@ class Puan(PLDAG):
             )
         )
     
-    def solve(self, objectives: List[dict], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True) -> List[dict]:
+    def solve(self, objectives: List[dict], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True, minimize: bool = True) -> List[dict]:
         return list(
             map(
                 lambda solution: Solution(
@@ -1255,7 +1255,7 @@ class Puan(PLDAG):
                         )
                     )
                 ),
-                super().solve(objectives, assume, solver, double_bind_constraints)
+                super().solve(objectives, assume, solver, double_bind_constraints, minimize)
             )
         )
     
