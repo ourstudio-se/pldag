@@ -1055,7 +1055,7 @@ class PLDAG:
         """
         return self.cut(cuts).sub(roots)
     
-    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True) -> List[Dict[str, complex]]:
+    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True, minimize: bool = True) -> List[Dict[str, complex]]:
         """
             Solves the model with the given objectives.
 
@@ -1097,7 +1097,7 @@ class PLDAG:
 
         if solver == Solver.GLPK:
             from pldag.solver.glpk_solver import solve_lp
-            solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
+            solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()), minimize=minimize)
         else:
             raise ValueError(f"Solver `{solver}` not installed.")
         
