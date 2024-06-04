@@ -1266,7 +1266,6 @@ class Puan(PLDAG):
     def from_super(super_model: PLDAG) -> 'Puan':
         new_model = Puan()
         new_model._amat = super_model._amat
-        new_model._wmat = super_model._wmat
         new_model._dvec = super_model._dvec
         new_model._bvec = super_model._bvec
         new_model._nvec = super_model._nvec
