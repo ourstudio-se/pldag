@@ -1196,6 +1196,11 @@ class Puan(PLDAG):
         self.set_meta(id, properties)
         return id
     
+    def set_not(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_not(children, alias)
+        self.set_meta(id, properties)
+        return id
+    
     def set_xor(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
         id = super().set_xor(children, alias)
         self.set_meta(id, properties)
