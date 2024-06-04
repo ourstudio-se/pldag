@@ -276,16 +276,6 @@ def test_multiple_pointers():
 
 def test_to_polyhedron():
 
-    # Test if weights has been set
-    model = PLDAG()
-    model.set_primitives("ab")
-    model.set_atmost(["a","b"], 4, weights=[3, 5])
-    A, b = model.to_polyhedron(double_binding=True)
-    assert (A.dot([1,0,0]) >= b).all() == False
-    assert (A.dot([1,0,1]) >= b).all() == True
-    assert (A.dot([1,1,1]) >= b).all() == False
-    assert (A.dot([1,1,0]) >= b).all() == True
-
     model = PLDAG()
     model.set_primitive("a", -5+3j)
     model.set_primitive("b", 2j)

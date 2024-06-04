@@ -25,8 +25,6 @@ class PLDAG:
     def __init__(self):
         # Adjacency matrix. Each entry is a boolean (0/1) indicating if there is a dependency
         self._amat = np.zeros((0, 0),   dtype=np.int64)
-        # Weight matrix. Each entry is a weight on the dependency
-        self._wmat = np.zeros((0, 0),   dtype=np.int64)
         # Boolean vector indicating if negated
         self._nvec = np.zeros((0, ),    dtype=bool)
         # Complex vector representing bounds of complex number data type
@@ -46,7 +44,6 @@ class PLDAG:
     def __eq__(self, other: "PLDAG") -> bool:
         return (self.sha1() == other.sha1()
                 and np.array_equal(self._amat, other._amat)
-                and np.array_equal(self._wmat, other._wmat)
                 and np.array_equal(self._nvec, other._nvec)
                 and np.array_equal(self._dvec, other._dvec)
                 and np.array_equal(self._bvec, other._bvec)
@@ -159,20 +156,14 @@ class PLDAG:
         """
         return self.composites.tolist().index(id)
     
-    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None, weights: Optional[List[int]] = None) -> str:
+    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at least `value`.
         """
         _id = self._composite_id(children, bias, negate)
         if not _id in self._imap:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            if weights:
-                if not len(weights) == len(children):
-                    raise ValueError("Weights must be the same length as children.")
-                self._amat[-1, [self._col(child) for child in children]] = weights
-            else:
-                self._amat[-1, [self._col(child) for child in children]] = 1
-
+            self._amat[-1, [self._col(child) for child in children]] = 1
             self._dvec = np.append(self._dvec, complex(0, 1))
             self._bvec = np.append(self._bvec, complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2)))
             self._nvec = np.append(self._nvec, negate)
@@ -342,7 +333,6 @@ class PLDAG:
         """Copy the model"""
         model = PLDAG()
         model._amat = self._amat.copy()
-        model._wmat = self._wmat.copy()
         model._dvec = self._dvec.copy()
         model._bvec = self._bvec.copy()
         model._nvec = self._nvec.copy()
@@ -490,7 +480,6 @@ class PLDAG:
             self._dvec[self._col(id)] = bound
         else:
             self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.int64)))
-            self._wmat = np.hstack((self._wmat, np.zeros((self._wmat.shape[0], 1), dtype=np.int64)))
             self._dvec = np.append(self._dvec, bound)
             self._cvec = np.append(self._cvec, False)
             self._imap[id] = self._amat.shape[1] - 1
@@ -528,7 +517,7 @@ class PLDAG:
             self.set_primitive(id, bound)
         return ids
     
-    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, weights: Optional[List[int]] = None) -> str:
+    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at least `value`.
 
@@ -553,9 +542,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(references, -1 * value, False, alias, weights)
+        return self.set_gelineq(references, -1 * value, False, alias)
     
-    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, weights: Optional[List[int]] = None) -> str:
+    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at most `value`.
 
@@ -580,7 +569,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(references, -1 * (value + 1), True, alias, weights)
+        return self.set_gelineq(references, -1 * (value + 1), True, alias)
     
     def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
         """
@@ -947,7 +936,6 @@ class PLDAG:
         """
         sub_model = PLDAG()
         sub_model._amat = self._amat[row_idxs][:, col_idxs]
-        sub_model._wmat = self._wmat[row_idxs][:, col_idxs]
         sub_model._nvec = self._nvec[row_idxs]
         sub_model._dvec = self._dvec[col_idxs]
         sub_model._bvec = self._bvec[row_idxs]
@@ -1151,11 +1139,11 @@ class Puan(PLDAG):
     def __init__(self):
         super().__init__()
         self.data: dict = {}
+        self._record = {}
 
     def copy(self) -> "Puan":
         new_model = Puan()
         new_model._amat = self._amat.copy()
-        new_model._wmat = self._wmat.copy()
         new_model._dvec = self._dvec.copy()
         new_model._bvec = self._bvec.copy()
         new_model._nvec = self._nvec.copy()
@@ -1183,18 +1171,18 @@ class Puan(PLDAG):
             )
         )
 
-    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None, weights: Optional[List[int]] = None, properties: dict = {}) -> str:
-        id = super().set_gelineq(children, bias, negate, alias, weights)
+    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_gelineq(children, bias, negate, alias)
         self.set_meta(id, properties)
         return id
     
-    def set_atmost(self, children: List[str], value: int, alias: Optional[str] = None, weights: Optional[List[int]] = None, properties: dict = {}) -> str:
-        id = super().set_atmost(children, value, alias, weights)
+    def set_atmost(self, children: List[str], value: int, alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_atmost(children, value, alias)
         self.set_meta(id, properties)
         return id
     
-    def set_atleast(self, children: List[str], value: int, alias: Optional[str] = None, weights: Optional[List[int]] = None, properties: dict = {}) -> str:
-        id = super().set_atleast(children, value, alias, weights)
+    def set_atleast(self, children: List[str], value: int, alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_atleast(children, value, alias)
         self.set_meta(id, properties)
         return id
     
@@ -1223,8 +1211,8 @@ class Puan(PLDAG):
         self.set_meta(id, properties)
         return id
     
-    def set_imply(self, antecedent: str, consequent: str, properties: dict = {}) -> str:
-        id = super().set_imply(antecedent, consequent)
+    def set_imply(self, antecedent: str, consequent: str, alias: Optional[str], properties: dict = {}) -> str:
+        id = super().set_imply(antecedent, consequent, alias)
         self.set_meta(id, properties)
         return id
     
