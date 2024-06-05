@@ -1216,7 +1216,7 @@ class Puan(PLDAG):
         self.set_meta(id, properties)
         return id
     
-    def set_imply(self, antecedent: str, consequent: str, alias: Optional[str], properties: dict = {}) -> str:
+    def set_imply(self, antecedent: str, consequent: str, alias: Optional[str] = None, properties: dict = {}) -> str:
         id = super().set_imply(antecedent, consequent, alias)
         self.set_meta(id, properties)
         return id
