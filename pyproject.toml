@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pldag"
-version = "0.8.68"
+version = "0.9.0"
 description = ""
 authors = ["znittzel <rikard@ourstudio.se>"]
 readme = "README.md"

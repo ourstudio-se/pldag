@@ -1,8 +1,8 @@
 import numpy as np
 from hashlib import sha1
-from itertools import groupby, repeat, starmap
+from itertools import groupby, starmap
 from functools import partial, lru_cache
-from typing import Dict, List, Set, Optional, Callable, Any
+from typing import Dict, List, Set, Optional, Callable, Any, Tuple
 from graphlib import TopologicalSorter
 
 from enum import Enum
@@ -23,10 +23,8 @@ class PLDAG:
     """
 
     def __init__(self):
-        # Adjacency matrix. Each entry is a boolean (0/1) indicating if there is a dependency
+        # Weighted adjacency matrix. Each entry is a coefficient indicating if there is a dependency and how strong it is.
         self._amat = np.zeros((0, 0),   dtype=np.int64)
-        # Boolean vector indicating if negated
-        self._nvec = np.zeros((0, ),    dtype=bool)
         # Complex vector representing bounds of complex number data type
         self._dvec = np.zeros((0, ),    dtype=complex)
         # Bias vector
@@ -44,7 +42,6 @@ class PLDAG:
     def __eq__(self, other: "PLDAG") -> bool:
         return (self.sha1() == other.sha1()
                 and np.array_equal(self._amat, other._amat)
-                and np.array_equal(self._nvec, other._nvec)
                 and np.array_equal(self._dvec, other._dvec)
                 and np.array_equal(self._bvec, other._bvec)
                 and np.array_equal(self._cvec, other._cvec)
@@ -76,11 +73,11 @@ class PLDAG:
         ).static_order()
     
     @staticmethod
-    def _composite_id(children: list, bias: int, negate: bool = False) -> str:
+    def _composite_id(coefficient_variables: List[Tuple[str,int]], bias: int) -> str:
         """
             Create a composite ID from a list of children.
         """
-        return sha1(("".join(map(lambda x: sha1(x.encode()).hexdigest(), sorted(set(children)))) + str(negate) + str(bias)).encode()).hexdigest()
+        return sha1(("".join(map(lambda x: str(x), sorted(set(coefficient_variables)))) + str(bias)).encode()).hexdigest()
     
     @property
     def primitives(self) -> np.ndarray:
@@ -120,18 +117,6 @@ class PLDAG:
     def _inner_bounds(self) -> np.ndarray:
         return self._amat.dot(self._dvec) + self._bvec
     
-    def printable(self, id: str) -> str:
-        """
-            Get the printable version of the given ID.
-        """
-        if id in self.primitives:
-            return f"{id} = {self._dvec[self._col(id)]}"
-        elif id in self.composites:
-            join_on = " + " if self._nvec[self._row(id)] == 0 else " - "
-            return f"{id} = " + join_on.join(self.dependencies(id)) + f" + {self._bvec[self._row(id)].real} >= 0"
-        else:
-            raise ValueError(f"ID {id} not found.")
-    
     def _icol(self, i: int) -> str:
         """
             Returns the ID of the given column index.
@@ -156,17 +141,16 @@ class PLDAG:
         """
         return self.composites.tolist().index(id)
     
-    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None) -> str:
+    def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None) -> str:
         """
             Add a composite constraint of at least `value`.
         """
-        _id = self._composite_id(children, bias, negate)
+        _id = self._composite_id(coefficient_variables, bias)
         if not _id in self._imap:
             self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            self._amat[-1, [self._col(child) for child in children]] = 1
+            self._amat[-1, [self._col(cv[0]) for cv in coefficient_variables]] = [cv[1] for cv in coefficient_variables]
             self._dvec = np.append(self._dvec, complex(0, 1))
-            self._bvec = np.append(self._bvec, complex(*repeat(bias * (1-negate) + (bias + 1) * negate * -1, 2)))
-            self._nvec = np.append(self._nvec, negate)
+            self._bvec = np.append(self._bvec, complex(bias, bias))
             self._cvec = np.append(self._cvec, True)
             self._imap[_id] = self._amat.shape[1] - 1
 
@@ -176,7 +160,27 @@ class PLDAG:
         return _id
     
     @staticmethod
-    def _prop_upstream_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray):
+    def negate(A: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+            Negate the given equations on the form Ax + b >= 0.
+            Check out Polyhedron.md for more information.
+        """
+        return (-1 * A), (-1 * b) -1
+    
+    @staticmethod
+    def _sdot(A: np.ndarray, d: np.ndarray) -> np.ndarray:
+        """
+            Special dot product.
+            A@d, where d is flipped if coefficient in A is negative.
+
+            A: matrix (integer)
+            d: vector (complex)
+        """
+        r = np.abs(A) * d
+        return (-1j * np.conj(r * (A < 0)) + r * (A >= 0)).sum(axis=1) 
+    
+    @staticmethod
+    def _prop_upstream_algo(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, fixed: np.ndarray):
         """
             Propagates upstream, trying to infer values given what's been set. 
             NOTE: a composite variable may be true while the equation isn't decided yet. This can happen if a parent composite
@@ -197,9 +201,8 @@ class PLDAG:
         #    Or, [0 0] = [-1 0](x) + [-1 0](y) + [-1 0](z) + 2 >= 0 has an inner bound of [-1 0]+[-1 0]+[-1 0]+[2 2] = [-1 2] and should result in x≈0, y≈0 and z≈0, since A=0 is fixed
         _A = np.vstack((np.zeros((A.shape[1]-A.shape[0], A.shape[1]), dtype=np.int64), A))
         _B = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=complex), B)
-        _F = np.append(np.zeros(A.shape[1]-A.shape[0], dtype=bool), F)
         _fixed = fixed | (D.real == D.imag)
-        M = (_A == 1) & ~_fixed
+        M = (_A != 0) & ~_fixed
         for i in filter(
             lambda i: C[i] and M[i].any(), 
             reversed(
@@ -215,26 +218,23 @@ class PLDAG:
                 )
             )
         ):
-            r = _A[i].dot(D)
-            rf = (-1j * np.conj(r) * _F[i] + (1-_F[i]) * r) + _B[i]
-            re = D[M[i]].real
-            im = D[M[i]].imag
+            rf = PLDAG._sdot(_A[i:i+1], D)[0] + _B[i]
             if rf.imag == 0 and D[i].real == 1:
-                if _F[i]:
-                    D[M[i]] = re + re * 1j
-                else:
-                    D[M[i]] = im + im * 1j
+                # The upper inner bound is 0 and the outer bound is true.
+                # If variable's coefficient is positive, we set the variable's lower bound to its upper bound
+                # If variable's coefficient is negative, we set the variable's upper bound to its lower bound
+                D[M[i]] = (_A[i, M[i]] >= 0) * D[M[i]].imag + (_A[i, M[i]] < 0) * D[M[i]].real
 
             elif rf.real == -1 and D[i].imag == 0:
-                if _F[i]:
-                    D[M[i]] = im + im * 1j
-                else:
-                    D[M[i]] = re + re * 1j
+                # The lower inner bound is -1 and the outer bound is false.
+                # If variable's coefficient is positive, we set the variable's upper bound to its lower bound
+                # If variable's coefficient is negative, we set the variable's lower bound to its upper bound
+                D[M[i]] = (_A[i, M[i]] >= 0) * D[M[i]].real + (_A[i, M[i]] < 0) * D[M[i]].imag
 
         return D
     
     @staticmethod
-    def _prop_algo_downstream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
+    def _prop_algo_downstream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
 
         """
             Propagation algorithm.
@@ -250,16 +250,13 @@ class PLDAG:
             Returns the propagated bounds.
         """
 
-        def _prop_once(A: np.ndarray, C: np.ndarray, F: np.ndarray, B: np.ndarray, D: np.ndarray):
-            r = A.dot(D)
-            # Here we negate the equation bound if the node is negated
-            # E.g. -1+1j becomes -2+0j (mirrored on the line y = -x-1)
-            rf = (-1j * np.conj(r) * F + (1-F) * r) + B
+        def _prop_once(A: np.ndarray, C: np.ndarray, B: np.ndarray, D: np.ndarray):
+            rf = PLDAG._sdot(A, D) + B
             d = ~C * D
             d[C] = (rf.real >= 0) + 1j*(rf.imag >= 0)
             return d
 
-        prop = partial(_prop_once, A, C, F, B)    
+        prop = partial(_prop_once, A, C, B)    
         previous_D = D
         for _ in range(max_iterations):
             new_D = fixed * D + ~fixed * prop(previous_D)
@@ -270,11 +267,11 @@ class PLDAG:
         raise Exception(f"Maximum iterations ({max_iterations}) reached without convergence.")
     
     @staticmethod
-    def _prop_algo_bistream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, F: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
+    def _prop_algo_bistream(A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, fixed: np.ndarray, max_iterations: int = 100):
         """
             Propagates the graph downstream and upstream, and returns the propagated bounds.
         """
-        return PLDAG._prop_upstream_algo(A, B, C, PLDAG._prop_algo_downstream(A, B, C, D, F, fixed, max_iterations), F, fixed)
+        return PLDAG._prop_upstream_algo(A, B, C, PLDAG._prop_algo_downstream(A, B, C, D, fixed, max_iterations), fixed)
     
     def _propagate(self, method: str, query: dict, freeze: bool = True) -> dict:
         """
@@ -284,7 +281,6 @@ class PLDAG:
         B: np.ndarray = self._bvec
         C: np.ndarray = self._cvec
         D: np.ndarray = self._dvec.copy()
-        F: np.ndarray = self._nvec
 
         # Filter query based on existing variables
         query = {k: v for k, v in query.items() if k in self._imap}
@@ -297,11 +293,11 @@ class PLDAG:
         D[[self._imap[q] for q in query]] = np.array(list(query.values()))
 
         if method == "downstream":
-            res = self._prop_algo_downstream(A, B, C, D, F, qprimes)
+            res = self._prop_algo_downstream(A, B, C, D, qprimes)
         elif method == "upstream":
-            res = self._prop_upstream_algo(A, B, C, D, F, qprimes)
+            res = self._prop_upstream_algo(A, B, C, D, qprimes)
         elif method == "bistream":
-            res = self._prop_algo_bistream(A, B, C, D, F, qprimes)
+            res = self._prop_algo_bistream(A, B, C, D, qprimes)
         else:
             raise ValueError(f"Method '{method}' not found.")
         
@@ -335,7 +331,6 @@ class PLDAG:
         model._amat = self._amat.copy()
         model._dvec = self._dvec.copy()
         model._bvec = self._bvec.copy()
-        model._nvec = self._nvec.copy()
         model._cvec = self._cvec.copy()
         model._imap = self._imap.copy()
         model._amap = self._amap.copy()
@@ -356,7 +351,6 @@ class PLDAG:
             if id in self.composites:
                 row_id = self._row(id)
                 self._bvec = np.delete(self._bvec, row_id)
-                self._nvec = np.delete(self._nvec, row_id)
                 self._amap = dict(filter(lambda x: x[1] != id, self._amap.items()))
                 self._amat = np.delete(self._amat, row_id, axis=0)
 
@@ -387,14 +381,10 @@ class PLDAG:
         return set(
             map(
                 lambda x: list(self._imap)[x],
-                np.argwhere(self._amat[self._row(id)] == 1).T[0]
+                np.argwhere(self._amat[self._row(id)] != 0).T[0]
             )
         )
     
-    def negated(self, id: str) -> bool:
-        """Get the negated state of the given id"""
-        return bool(self._nvec[self._row(id)])
-
     def propagate(self, query: dict = {}, freeze: bool = True) -> dict:
         """
             Propagates the graph downstream, towards the root node(s), and returns the propagated bounds.
@@ -513,9 +503,12 @@ class PLDAG:
             List[str]
                 The IDs of the primitive variables.
         """
-        for id in ids:
-            self.set_primitive(id, bound)
-        return ids
+        return list(
+            map(
+                lambda x: self.set_primitive(x, bound),
+                ids
+            )
+        )
     
     def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
@@ -542,7 +535,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(references, -1 * value, False, alias)
+        return self.set_gelineq(list(map(lambda r: (r, 1), references)), -1 * value, alias)
     
     def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
@@ -569,7 +562,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(references, -1 * (value + 1), True, alias)
+        return self.set_gelineq(list(map(lambda r: (r, -1), references)), value, alias)
     
     def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
         """
@@ -727,14 +720,40 @@ class PLDAG:
         """
         return self.set_or([self.set_not([condition]), consequence], alias)
 
-    def set_equal(self, references: List[str], alias: Optional[str] = None) -> str:
+    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
-            Add a composite constraint of an EQUAL operation.
+            Add a composite constraint of an EQUAL operation: sum(references) == value.
 
             Parameters
             ----------
             references : List[str]
                 The references to composite constraints or primitive variables.
+
+            value : int
+                The value to be equal.
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self.set_and([
+            self.set_atleast(references, value),
+            self.set_atmost(references, value),
+        ], alias)
+    
+    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None) -> str:
+        """
+            Add a composite constraint of an EQUIVALENCE operation, lhs <-> rhs.
+            It is equivalent to set_and([set_imply(lhs, rhs), set_imply(rhs, lhs)]).
+
+            Parameters
+            ----------
+            lhs : str
+                The left-hand side reference.
+
+            rhs : str
+                The right-hand side reference.
 
             Returns
             -------
@@ -742,8 +761,8 @@ class PLDAG:
                 The ID of the composite constraint.
         """
         return self.set_or([
-            self.set_and(references),
-            self.set_not(references),
+            self.set_and([lhs, rhs]),
+            self.set_not([lhs, rhs]),
         ], alias)
     
     @lru_cache
@@ -770,31 +789,13 @@ class PLDAG:
             True
         """
 
-        # From a aux variable A such that A <-> X, and the constraint X: c*x + c*y + c*z >= d, where n is the number of terms on left hand side, we have the following constraints:
-        # `mx` is the maximum sum over the inner variables in a constraint X.
-        # For atleast constraints:
-        # 1) -dA + sum(+X) >= ±0             (-A v +X)
-        # 2) +mx*A + sum(-X) >= -(d-1)       (+A v -X)
-
-        # For atmost constraints:
-        # 1) (-mx-d)A + sum(-X) >= -mx       (-A v +X)
-        # 2) (-d+mn+1)A + sum(+X) >= (-d+1)     (+A v -X)
-
+        # References to Polyhedron.md explaining the construction of the matrix A and bias vector b
         # Create the matrix
-        if double_binding:
-            A = np.zeros((self._amat.shape[0] * 2, self._amat.shape[1]), dtype=np.int64)
-            b = np.zeros(self._amat.shape[0] * 2, dtype=np.int64)
-        else:
-            A = np.zeros(self._amat.shape, dtype=np.int64)
-            b = np.zeros(self._amat.shape[0], dtype=np.int64)
+        A = self._amat.copy().astype(np.int64)
+        b = self._bvec.copy().real.astype(np.int64)
 
-        # Find max of inner bounds for each composite
-        ad = self._amat.dot(self._dvec)
-        mn = ad.real
-        mx = ad.imag
-
-        # Extract `d` vector from bias
-        d = -1 * self._bvec.real
+        # Calculate inner bounds for each composite
+        ib = self._sdot(A, self._dvec)
 
         # Adjacent points
         adj_points = np.argwhere(self._amat != 0)
@@ -803,47 +804,40 @@ class PLDAG:
         if adj_points.size == 0:
             return np.zeros((0, self._amat.shape[1]), dtype=np.int64), np.zeros(0, dtype=np.int64)
 
-        # A -> X row indices
-        A_X_ri = adj_points.T[0]
-        A_X = np.arange(self._amat.shape[0])
-        # X -> A row indices
-        X_A = A_X + A_X.max() + 1
-        X_A_ri = adj_points.T[0] + A_X.max() + 1
+        # Pi -> Phi row indices
+        Pi_Phi_i = np.arange(self._amat.shape[0])
 
-        # Fill the matrix with adjacency points
-        A[A_X_ri, adj_points.T[1]] = -self._amat[A_X_ri, adj_points.T[1]]
+        # Find coefficient to Pi (d), preparing for Pi -> Phi
+        Pi_Phi_d = np.abs(np.array([ib.real, ib.imag], dtype=np.int64)).max(axis=0)
+
+        # Step 1. Set Pi in A to be the coefficient to Pi, -dπ + ... + b >= 0
+        A[Pi_Phi_i, self._cvec] = -1 * Pi_Phi_d
+
+        # Step 2. Add onto bias: -dπ + ... + (b + d) >= 0
+        b[Pi_Phi_i] += Pi_Phi_d
+        
+        # If double binding, we need also to set Phi -> Pi
         if double_binding:
-            A[X_A_ri, adj_points.T[1]] = -self._amat[A_X_ri, adj_points.T[1]]
 
-        # Assign 1 instead of -1 to the at least A -> X, and at most constraints for X -> A.
-        A[A_X[~self._nvec], :] *= -1
-        if double_binding:
-            A[X_A[self._nvec], :] *= -1
+            # Phi -> Pi row indices
+            Phi_Pi_i = np.arange(self._amat.shape[0])
 
-        # Composite index in matrix
-        cidx = np.array(list(self._imap.values()))[self._cvec]
+            # Step 1. Calculate !phi
+            n_A, n_b = self.negate(self._amat, self._bvec.real.astype(np.int64))
 
-        # Set coef and bias for at least aux variable A->X
-        # 1) (-d+mn)A + sum(-X) >= mn            (-A v +X)
-        A[A_X[~self._nvec], cidx[~self._nvec]] = -d[~self._nvec]+mn[~self._nvec]
-        b[A_X[~self._nvec]] = mn[~self._nvec]
+            # Step 2. Calculate d = max( abs( !phi ) )
+            n_ib = self._sdot(n_A, self._dvec)
+            Phi_Pi_d = np.abs(np.array([n_ib.real, n_ib.imag], dtype=np.int64)).max(axis=0)
 
-        # Set coef and bias for at least aux var X->A
-        # 2) +mx*A + sum(-X) >= -(d-1)       (+A v -X)
-        if double_binding:
-            A[X_A[~self._nvec], cidx[~self._nvec]] = mx[~self._nvec]-(d[~self._nvec] - 1)
-            b[X_A[~self._nvec]] = -(d[~self._nvec] - 1)
+            # Step 3. Append (d-bias(!phi))π to A
+            n_A[Phi_Pi_i, self._cvec] = Phi_Pi_d - n_b
 
-        # Set coef and bias for at most aux variable A->X
-        # 1) (-mx-d)A + sum(-X) >= -mx       (-A v +X)
-        A[A_X[self._nvec], cidx[self._nvec]] = -mx[self._nvec] - d[self._nvec]
-        b[A_X[self._nvec]] = -mx[self._nvec]
+            # Extend A, b to be able to handle Phi -> Pi
+            A = np.vstack([A, n_A], dtype=np.int64)
+            b = np.append(b, n_b)
 
-        # Set coef and bias for at most aux var X->A
-        # 2) (-d-mn+1)A + sum(+X) >= (-d+1)     (+A v -X)
-        if double_binding:
-            A[X_A[self._nvec], cidx[self._nvec]] = -d[self._nvec] + 1 - mn[self._nvec]
-            b[X_A[self._nvec]] = -d[self._nvec] + 1
+        # Since we expects Ax >= b and so far assumed Ax + b >= 0, we need to flip b before continuing
+        b = -1 * b
 
         # Fix constant variables
         for i, vs in groupby(
@@ -936,7 +930,6 @@ class PLDAG:
         """
         sub_model = PLDAG()
         sub_model._amat = self._amat[row_idxs][:, col_idxs]
-        sub_model._nvec = self._nvec[row_idxs]
         sub_model._dvec = self._dvec[col_idxs]
         sub_model._bvec = self._bvec[row_idxs]
         sub_model._cvec = self._cvec[col_idxs]
@@ -1133,20 +1126,18 @@ class Solution:
                 self.variables
             )
         )
-
+    
 class Puan(PLDAG):
 
     def __init__(self):
         super().__init__()
         self.data: dict = {}
-        self._record = {}
 
     def copy(self) -> "Puan":
         new_model = Puan()
         new_model._amat = self._amat.copy()
         new_model._dvec = self._dvec.copy()
         new_model._bvec = self._bvec.copy()
-        new_model._nvec = self._nvec.copy()
         new_model._cvec = self._cvec.copy()
         new_model._imap = self._imap.copy()
         new_model._amap = self._amap.copy()
@@ -1171,8 +1162,8 @@ class Puan(PLDAG):
             )
         )
 
-    def set_gelineq(self, children: list, bias: int, negate: bool = False, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_gelineq(children, bias, negate, alias)
+    def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_gelineq(coefficient_variables, bias, alias)
         self.set_meta(id, properties)
         return id
     
@@ -1211,8 +1202,13 @@ class Puan(PLDAG):
         self.set_meta(id, properties)
         return id
     
-    def set_equal(self, references: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_equal(references, alias)
+    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_equal(references, value, alias)
+        self.set_meta(id, properties)
+        return id
+    
+    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None, properties: dict = {}) -> str:
+        id = super().set_equiv(lhs, rhs, alias)
         self.set_meta(id, properties)
         return id
     
@@ -1243,7 +1239,7 @@ class Puan(PLDAG):
                 lambda solution: Solution(
                     variables=list(
                         starmap(
-                            lambda k,v: Variable(k, v, self.data.get(k, {}), self.id_to_alias(k) or None),
+                            lambda k,v: Variable(k, v, self.data.get(k), self.id_to_alias(k) or None),
                             solution.items()
                         )
                     )
@@ -1256,7 +1252,7 @@ class Puan(PLDAG):
         return Solution(
             variables=list(
                 starmap(
-                    lambda k,v: Variable(k, v, self.data.get(k, {}), self.id_to_alias(k) or None),
+                    lambda k,v: Variable(k, v, self.data.get(k), self.id_to_alias(k) or None),
                     super().propagate(query, freeze).items()
                 )
             )
@@ -1268,7 +1264,6 @@ class Puan(PLDAG):
         new_model._amat = super_model._amat
         new_model._dvec = super_model._dvec
         new_model._bvec = super_model._bvec
-        new_model._nvec = super_model._nvec
         new_model._cvec = super_model._cvec
         new_model._imap = super_model._imap
         new_model._amap = super_model._amap

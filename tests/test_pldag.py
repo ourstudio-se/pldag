@@ -1,16 +1,21 @@
 import numpy as np
 from pldag import PLDAG
-from hypothesis import given, strategies, assume, settings
+from hypothesis import given, strategies
 
+def composite_coefficient_variables():
+    return strategies.tuples(
+        strategies.text(),
+        strategies.integers(min_value=-5, max_value=5),
+    )
+    
 def composite_proposition_strategy():
     """
         Returns a strategy of all necessary components of a composite proposition.
         First element is the children, second bias and third if negated or not.
     """
     return strategies.tuples(
-        strategies.sets(strategies.text(), min_size=1, max_size=5),
-        strategies.integers(min_value=1, max_value=5),
-        strategies.booleans(),
+        strategies.sets(composite_coefficient_variables(), min_size=1, max_size=5),
+        strategies.integers(min_value=-5, max_value=5),
     )
 
 def composite_proposition_strategies():
@@ -226,20 +231,6 @@ def test_dependencies():
     assert model.dependencies(b) == {"y", "z"}
     assert model.dependencies(c) == {"x"}
 
-def test_negated():
-    model = PLDAG() 
-    model.set_primitives("xyz")
-    c=model.set_atmost(["x"], 1)
-    b=model.set_atmost(["y", "z"], 2)
-    a=model.set_atleast("xyz", 2)
-    assert model.negated(a) == False
-    assert model.negated(b) == True
-    assert model.negated(c) == True
-
-    assert np.array_equal(model.get(a), np.array([1j]))
-    assert np.array_equal(model.get(b), np.array([1j]))
-    assert np.array_equal(model.get(c), np.array([1j]))
-
 def test_cycle_detection():
     model = PLDAG() 
     model.set_primitives("xyz")
@@ -287,8 +278,8 @@ def test_to_polyhedron():
     model.set_atmost("abcd", 5, alias="C")
     A,b = model.to_polyhedron(double_binding=True)
     
-    # b and e is not at least 3, therefore should also A be false
-    # a, b, c and is at least -9, therefore should B be true
+    # b and e is not at least 3, therefore should A be false
+    # a, b, c and d is at least -9, therefore should B be true
     # a, b, c and d is at most 5, therefore should C be true
     assert (A.dot([0,0,0,0,0,0,1,1]) >= b).all()
 
@@ -321,21 +312,6 @@ def test_to_polyhedron():
     A,b = model.to_polyhedron(double_binding=True)
     assert A.shape == (0, 4)
     assert b.shape == (0,)
-    
-    model = PLDAG()
-    model.set_primitives("abc")
-    # Keep an eye on this one
-    a = model.set_atleast(["a","b"], 1)
-    model.set_atleast(["b","c"], 1)
-    # We simulate to set `a` to have 0-references
-    model._amat[0] = 0
-    A,b = model.to_polyhedron(double_binding=False)
-    # We should still have a propert polyhedron
-    assert A.shape == (2, 5)
-    assert b.shape == (2,)
-    # But the first one, or `a`, should forbid `a`
-    assert A[model._row(a), model._col(a)] == -1
-    assert b[model._row(a)] == 0
 
 def test_logical_operators():
 
