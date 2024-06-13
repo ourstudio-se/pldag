@@ -143,7 +143,30 @@ class PLDAG:
     
     def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None) -> str:
         """
-            Add a composite constraint of at least `value`.
+            Sets a linear inequality constraint, ax + by + cz + bias >= 0.
+
+            Parameters
+            ----------
+            coefficient_variables : List[Tuple[str, int]]
+                The variables and their coefficients. For instance, [("x", 1), ("y", 1), ("z", 1)].
+
+            bias : int
+                The bias of the constraint.
+
+            alias : Optional[str]
+                The alias of the constraint.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> model.set_gelineq([("x", 1), ("y", 1), ("z", 1)], -3)
+            da4ab8efc9b188b591115c3f376d0bc1ac6481ca
+
+            Returns
+            -------
+            str
+                The ID of the constraint.
         """
         _id = self._composite_id(coefficient_variables, bias)
         if not _id in self._imap:
@@ -164,6 +187,28 @@ class PLDAG:
         """
             Negate the given equations on the form Ax + b >= 0.
             Check out Polyhedron.md for more information.
+
+            Parameters
+            ----------
+            A : np.ndarray (2D integer matrix)
+                A weighted adjacency matrix.
+
+            b : np.ndarray (1D integer vector)
+                A bias vector.
+
+            Examples
+            --------
+            >>> import numpy as np
+            >>> A = np.array([[1, 1, 0], [1, 1, 1]])
+            >>> b = np.array([-1, -2])
+            >>> PLDAG.negate(A, b)
+            (array([[-1, -1,  0],
+                    [-1, -1, -1]]), array([ 0,  1]))
+
+            Returns
+            -------
+            Tuple[np.ndarray, np.ndarray]
+                The negated matrix and bias vector.
         """
         return (-1 * A), (-1 * b) -1
     
@@ -173,8 +218,23 @@ class PLDAG:
             Special dot product.
             A@d, where d is flipped if coefficient in A is negative.
 
-            A: matrix (integer)
-            d: vector (complex)
+            Parameters
+            ----------
+            A : np.ndarray (2D integer matrix)
+            d : np.ndarray (1D complex vector)
+
+            Examples
+            --------
+            >>> import numpy as np
+            >>> A = np.array([[1],[-1]])
+            >>> d = np.array([1j])
+            >>> PLDAG._sdot(A, d)
+            array([ 0.+1.j, -1.+0.j])
+
+            Returns
+            -------
+            np.ndarray
+                The vector result of the special dot product.
         """
         r = np.abs(A) * d
         return (-1j * np.conj(r * (A < 0)) + r * (A >= 0)).sum(axis=1) 
