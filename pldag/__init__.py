@@ -1290,8 +1290,8 @@ class Solution:
     
 class Puan(PLDAG):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT):
+        super().__init__(compilation_setting)
         self.data: dict = {}
 
     def copy(self) -> "Puan":
