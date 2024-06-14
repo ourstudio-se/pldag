@@ -283,13 +283,15 @@ class PLDAG:
                 # The upper inner bound is 0 and the outer bound is true.
                 # If variable's coefficient is positive, we set the variable's lower bound to its upper bound
                 # If variable's coefficient is negative, we set the variable's upper bound to its lower bound
-                D[M[i]] = (_A[i, M[i]] >= 0) * D[M[i]].imag + (_A[i, M[i]] < 0) * D[M[i]].real
+                new_value = (_A[i, M[i]] >= 0) * D[M[i]].imag + (_A[i, M[i]] < 0) * D[M[i]].real
+                D[M[i]] = list(map(lambda x: complex(x, x), new_value))
 
             elif rf.real == -1 and D[i].imag == 0:
                 # The lower inner bound is -1 and the outer bound is false.
                 # If variable's coefficient is positive, we set the variable's upper bound to its lower bound
                 # If variable's coefficient is negative, we set the variable's lower bound to its upper bound
-                D[M[i]] = (_A[i, M[i]] >= 0) * D[M[i]].real + (_A[i, M[i]] < 0) * D[M[i]].imag
+                new_value = (_A[i, M[i]] >= 0) * D[M[i]].real + (_A[i, M[i]] < 0) * D[M[i]].imag
+                D[M[i]] = list(map(lambda x: complex(x, x), new_value))
 
         return D
     
@@ -670,7 +672,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(references, len(references), alias)
+        return self.set_atleast(set(references), len(set(references)), alias)
     
     def set_not(self, references: List[str], alias: Optional[str] = None) -> str:
         """

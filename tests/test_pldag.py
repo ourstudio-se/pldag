@@ -412,40 +412,6 @@ def test_cut():
 def test_propagate_upstream():
 
     model = PLDAG()
-    model.set_primitives("xy")
-    model.set_primitive("t", 10j)
-
-    id = model.set_and([
-        model.set_xor([
-            model.set_imply(
-                model.set_atleast("t", 7),
-                "x"
-            ),
-            model.set_imply(
-                model.set_atmost("t", 6),
-                "y"
-            ),
-        ]),
-        model.set_xor(["x", "y"])
-    ])
-    res = model.propagate_bistream({"t": 7+7j, id: 1+1j}, freeze=True)
-    res.get("x") == 0j
-    res.get("y") == 1+1j
-
-    model = PLDAG()
-    model.set_primitive("x", 10j)
-    model.set_primitive("y")
-    id1 = model.set_atleast(["x"], 10)
-    id2 = model.set_atleast(["x", "y"], 11)
-    model._dvec[model._imap[id1]] = 1+1j
-    model._dvec[model._imap[id2]] = 1+1j
-    model.get("x") == 10j
-    model.get("y") == 1j
-    model.propagate_upstream()
-    model.get("x") == 10+10j
-    model.get("y") == 1+1j
-    
-    model = PLDAG()
     model.set_primitive("w", 10j)
     model.set_primitives("xyz")
     top = model.set_and([
@@ -469,39 +435,67 @@ def test_propagate_upstream():
         ),
         model.set_xor(["x", "y", "z"], alias="x XOR y XOR z")
     ], alias="top")
-    model._dvec[model._imap["w"]] = 5+5j
-    model.propagate()
-    model._dvec[model._imap[top]] = 1+1j
-    model.propagate_upstream()
-    model.get("w") == 5+5j
-    model.get("x") == 1+1j
+    res = model.propagate_bistream({"w": 5+5j, top: 1+1j})
+    assert res.get("w") == 5+5j
+    assert res.get("x") == 1+1j
+    
+    model = PLDAG()
+    model.set_primitives("xy")
+    model.set_primitive("t", 10j)
+
+    id = model.set_and([
+        model.set_xor([
+            model.set_imply(
+                model.set_atleast("t", 7),
+                "x"
+            ),
+            model.set_imply(
+                model.set_atmost("t", 6),
+                "y"
+            ),
+        ]),
+        model.set_xor(["x", "y"])
+    ])
+    res = model.propagate_bistream({"t": 7+7j, id: 1+1j}, freeze=True)
+    assert res.get("x") == 0j
+    assert res.get("y") == 1+1j
+
+    model = PLDAG()
+    model.set_primitive("x", 10j)
+    model.set_primitive("y")
+    id1 = model.set_atleast(["x"], 10)
+    id2 = model.set_atleast(["x", "y"], 11)
+    res = model.propagate_upstream({id1: 1+1j, id2: 1+1j})
+    assert res.get("x") == 10+10j
+    assert res.get("y") == 1+1j
 
     model = PLDAG()
     model.set_primitives("xyz")
     id = model.set_xor("xyz")
     model.set_primitive("x", 1+1j)
-    model.propagate()
-    model._dvec[model._imap[id]] = 1+1j
-    model.propagate_upstream()
-    model.get("x") == 1+1j
-    model.get("y") == 0j
-    model.get("z") == 0j
+    res = model.propagate_bistream({id: 1+1j})
+    assert res.get("x") == 1+1j
+    assert res.get("y") == 0j
+    assert res.get("z") == 0j
 
     model = PLDAG()
     model.set_primitives("xyz")
     id = model.set_or("xyz")
-    model.propagate()
-    model._dvec[model._imap[id]] = 0j
-    model.propagate_upstream()
-    model.get("x") == 0j
-    model.get("y") == 0j
-    model.get("z") == 0j
+    res = model.propagate_bistream({id: 0j})
+    assert res.get("x") == 0j
+    assert res.get("y") == 0j
+    assert res.get("z") == 0j
 
     model = PLDAG()
     model.set_primitives("xy")
     id = model.set_atmost("xy", 1)
-    model.propagate()
-    model._dvec[model._imap[id]] = 0j
-    model.propagate_upstream()
-    model.get("x") == 1+1j
-    model.get("y") == 1+1j
+    res = model.propagate_bistream({id: 0j})
+    assert res.get("x") == 1+1j
+    assert res.get("y") == 1+1j
+
+def test_adding_duplicates_to_set_and():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_and("xxx")
+    assert model._bvec[0] == -1-1j
