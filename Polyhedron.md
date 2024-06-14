@@ -1,8 +1,7 @@
 # How to transform $\pi \leftrightarrow \phi$, where $\pi$ is a boolean variable and $\phi$ is a linear inequality constraint, to a new linear inequality constraint.
-First of all, there is no single linear inequality constraint that can represent both ways so we need to construct one way at the time. We'll start with $\pi \rightarrow \phi$. 
 
 ## A linear inequality constraint
-Before we begin, we'll define some words. A linear inequality constraint consists of four parts: 
+A linear inequality constraint consists of four parts: 
 1) Discrete variables ranging from any integer $i \in \mathbb{Z}$ to another integer $j \in \mathbb{Z}$, such that $i \leq j$. For instance a variable $x \in [-2, 3]$ takes on any integer between -2 and 3, including.
 2) Coefficients to each integer variable. A coefficient is an integer that is multiplied onto a variable when the inequality is evaluated.
 3) An operator $\gt$, $\geq$, $\lt$ or $\leq$. Here we'll always assume $\geq$.

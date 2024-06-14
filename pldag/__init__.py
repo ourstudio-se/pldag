@@ -1,6 +1,6 @@
 import numpy as np
 from hashlib import sha1
-from itertools import groupby, starmap
+from itertools import groupby, starmap, chain
 from functools import partial, lru_cache
 from typing import Dict, List, Set, Optional, Callable, Any, Tuple
 from graphlib import TopologicalSorter
@@ -13,6 +13,16 @@ class NoSolutionsException(Exception):
 class Solver(Enum):
     GLPK = "glpk"
 
+class CompilationSetting(str, Enum):
+    """
+        Compilation settings for the PL-DAG.
+    """
+    # Compiles the model on each change.
+    INSTANT = "instant"
+
+    # Compiles the model on demand.
+    ON_DEMAND = "on_demand"
+
 class PLDAG:
 
     """
@@ -22,7 +32,7 @@ class PLDAG:
         In summary, this data structure combines elements of a DAG with a logic network, utilizing prime numbers to encode relationships and facilitate operations within the graph.
     """
 
-    def __init__(self):
+    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT):
         # Weighted adjacency matrix. Each entry is a coefficient indicating if there is a dependency and how strong it is.
         self._amat = np.zeros((0, 0),   dtype=np.int64)
         # Complex vector representing bounds of complex number data type
@@ -35,6 +45,10 @@ class PLDAG:
         self._imap = {}
         # Alias to id mapping
         self._amap = {}
+        # Compilation setting
+        self._compilation_setting = compilation_setting
+        # Buffer for constraints
+        self._buffer = []
 
     def __hash__(self) -> int:
         return hash(self.sha1())
@@ -141,6 +155,89 @@ class PLDAG:
         """
         return self.composites.tolist().index(id)
     
+    def compile(self):
+        """
+            Compiles the model - sets all buffered constraints.
+        """
+        new_composites = list(
+            filter(
+                lambda x: x[0] not in self._imap, 
+                self._buffer,
+            )
+        )
+        if new_composites:
+
+            ids, coefficient_variables, biases, _ = zip(*new_composites)
+
+            # Pad the matrix with equal many rows and columns as new composites
+            self._amat = np.pad(self._amat, ((0, len(new_composites)), (0, len(new_composites))), mode='constant')
+
+            # Update the imap with the new composites
+            self._imap.update(
+                dict(
+                    zip(
+                        ids,
+                        range(self._amat.shape[1] - len(new_composites), self._amat.shape[1])
+                    )
+                )
+            ) 
+
+            # Create a rows/columns/values array from the buffer
+            rcv = np.array(
+                list(
+                    chain(
+                        *starmap(
+                            lambda irow, cvs: list(
+                                starmap(
+                                    lambda v, c: (
+                                        irow,
+                                        self._col(v),
+                                        c
+                                    ),
+                                    cvs
+                                )
+                            ), 
+                            zip(
+                                range(self._amat.shape[0] - len(new_composites), self._amat.shape[0]), 
+                                coefficient_variables,
+                            )
+                        )
+                    )
+                )
+            )
+            if rcv.size:
+                self._amat[rcv.T[0], rcv.T[1]] = rcv.T[2]
+
+            # Set d values
+            self._dvec = np.append(self._dvec, np.zeros(len(new_composites), dtype=complex) + complex(0, 1))
+
+            # Set all biases from the buffer
+            self._bvec = np.append(self._bvec, np.array(list(map(lambda bias: complex(bias, bias), biases))))
+
+            # Set equal many composite flags as new composites
+            self._cvec = np.append(self._cvec, np.ones(len(new_composites), dtype=bool))
+
+        # Update the amap with the ALL composites
+        # There may be existing once which only wants to add new aliases
+        all_ids, _, _, aliases = zip(*self._buffer)
+        self._amap.update(
+            dict(
+                filter(
+                    lambda x: x[0] is not None,
+                    zip(
+                        aliases,
+                        all_ids,
+                    )
+                )
+            )
+        )
+
+        # Clear the buffer
+        self._buffer = []
+
+        return all_ids
+
+    
     def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None) -> str:
         """
             Sets a linear inequality constraint, ax + by + cz + bias >= 0.
@@ -169,17 +266,11 @@ class PLDAG:
                 The ID of the constraint.
         """
         _id = self._composite_id(coefficient_variables, bias)
-        if not _id in self._imap:
-            self._amat = np.pad(self._amat, ((0, 1), (0, 1)), mode='constant')
-            self._amat[-1, [self._col(cv[0]) for cv in coefficient_variables]] = [cv[1] for cv in coefficient_variables]
-            self._dvec = np.append(self._dvec, complex(0, 1))
-            self._bvec = np.append(self._bvec, complex(bias, bias))
-            self._cvec = np.append(self._cvec, True)
-            self._imap[_id] = self._amat.shape[1] - 1
-
-        if alias:
-            self._amap[alias] = _id
-
+        self._buffer.append((_id, coefficient_variables, bias, alias))
+        
+        if self._compilation_setting == CompilationSetting.INSTANT:
+            self.compile()
+    
         return _id
     
     @staticmethod
@@ -565,12 +656,20 @@ class PLDAG:
             List[str]
                 The IDs of the primitive variables.
         """
-        return list(
-            map(
-                lambda x: self.set_primitive(x, bound),
-                ids
-            )
-        )
+        # Set first the existing ids
+        existing_ids = list(filter(lambda x: x in self._imap, ids))
+        if existing_ids:
+            self._dvec[[self._col(x) for x in existing_ids]] = bound
+
+        # Then add the new ids
+        new_ids = list(filter(lambda x: x not in self._imap, ids))
+        if new_ids:
+            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=np.int64)))
+            self._dvec = np.append(self._dvec, np.array([bound] * len(new_ids)))
+            self._cvec = np.append(self._cvec, np.array([False] * len(new_ids)))
+            self._imap.update(dict(zip(new_ids, range(self._amat.shape[1] - len(new_ids), self._amat.shape[1]))))
+                               
+        return ids
     
     def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """

@@ -1,5 +1,5 @@
 import numpy as np
-from pldag import PLDAG
+from pldag import PLDAG, CompilationSetting
 from hypothesis import given, strategies
 
 def composite_coefficient_variables():
@@ -499,3 +499,19 @@ def test_adding_duplicates_to_set_and():
     model.set_primitives("xyz")
     model.set_and("xxx")
     assert model._bvec[0] == -1-1j
+
+def test_on_demand_compiling_setting():
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitives("xyz")
+    root = model.set_and([
+        model.set_or("xy"),
+        model.set_or("yz"),
+    ])
+    assert root not in model._imap
+    result = model.propagate()
+    assert root not in result
+    assert "x" in result
+    model.compile()
+    result = model.propagate({"x": 1+1j, "y": 1+1j})
+    assert result.get(root) == 1+1j
