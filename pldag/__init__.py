@@ -15,6 +15,16 @@ class MissingVariableException(Exception):
     def __init__(self, variable: str):
         super().__init__(f"Variable '{variable}' is missing.")
 
+class MissingPrimitiveException(MissingVariableException):
+    
+    def __init__(self, primitive: str):
+        super().__init__(f"Primitive '{primitive}' is missing.")
+
+class MissingCompositeException(MissingVariableException):
+    
+    def __init__(self, composite: str):
+        super().__init__(f"Composite '{composite}' is missing.")
+
 class Solver(Enum):
     GLPK = "glpk"
 
@@ -161,7 +171,10 @@ class PLDAG:
         """
             Returns the row index of the given ID.
         """
-        return self.composites.tolist().index(id)
+        try:
+            return self.composites.tolist().index(id)
+        except ValueError:
+            raise MissingCompositeException(id)
     
     def compile(self):
         """

@@ -550,3 +550,12 @@ def test_compile_missing_primitive_should_fail_with_missing_variabel_exception()
         assert False
     except MissingVariableException:
         assert True
+
+def test_compile_missing_composite_should_fail_with_missing_variabel_exception():
+    
+    try:
+        model = PLDAG()
+        model._row("x")
+        assert False
+    except MissingCompositeException:
+        assert True
