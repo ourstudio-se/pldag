@@ -10,6 +10,11 @@ from enum import Enum
 class NoSolutionsException(Exception):
     pass
 
+class MissingVariableException(Exception):
+    
+    def __init__(self, variable: str):
+        super().__init__(f"Variable '{variable}' is missing.")
+
 class Solver(Enum):
     GLPK = "glpk"
 
@@ -147,7 +152,10 @@ class PLDAG:
         """
             Returns the column index of the given ID.
         """
-        return self._imap[id]
+        try:
+            return self._imap[id]
+        except KeyError:
+            raise MissingVariableException(id)
     
     def _row(self, id: str) -> int:
         """
@@ -442,10 +450,10 @@ class PLDAG:
 
         # Query translation into primes
         qprimes = np.zeros(D.shape[0], dtype=bool)
-        qprimes[[self._imap[q] for q in query]] = True and freeze
+        qprimes[[self._col(q) for q in query]] = True and freeze
 
         # Replace the observed bounds
-        D[[self._imap[q] for q in query]] = np.array(list(query.values()))
+        D[[self._col(q) for q in query]] = np.array(list(query.values()))
 
         if method == "downstream":
             res = self._prop_algo_downstream(A, B, C, D, qprimes)

@@ -1,5 +1,5 @@
 import numpy as np
-from pldag import PLDAG, CompilationSetting
+from pldag import *
 from hypothesis import given, strategies
 
 def composite_coefficient_variables():
@@ -531,3 +531,22 @@ def test_compile_on_empty_buffer_should_not_fail():
     model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
     model.set_primitive("x", 1+1j)
     model.compile()
+
+def test_compile_missing_primitive_should_fail_with_missing_variabel_exception():
+
+    try:
+        model = PLDAG(compilation_setting=CompilationSetting.INSTANT)
+        model.set_primitives("yz")
+        model.set_and("xy")
+        assert False
+    except MissingVariableException:
+        assert True
+
+    try:
+        model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+        model.set_primitives("yz")
+        model.set_and("xy")
+        model.compile()
+        assert False
+    except MissingVariableException:
+        assert True
