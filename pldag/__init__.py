@@ -25,6 +25,11 @@ class MissingCompositeException(MissingVariableException):
     def __init__(self, composite: str):
         super().__init__(f"Composite '{composite}' is missing.")
 
+class IsReferencedException(Exception):
+        
+    def __init__(self, variable_id: str):
+        super().__init__(f"Variable '{variable_id}' is referenced by other composites.")
+
 class FailedToCompileException(Exception):
     pass
 
@@ -550,6 +555,11 @@ class PLDAG:
         if len(id)>1:
             return list(map(self.delete, id))
         id = id[0]
+
+        # Check if id is referenced by other composites
+        if (self._amat[:, self._col(id)] != 0).any():
+            raise IsReferencedException(id)
+
         try:
             if id in self.composites:
                 row_id = self._row(id)

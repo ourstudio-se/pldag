@@ -573,3 +573,60 @@ def test_revert_if_compilation_fails():
         assert False
     except FailedToCompileException:
         assert model == copy_of_model
+
+def test_solve_missing_variable_should_fail():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_atleast("xyz", 1)
+    try:
+        model.solve([{}], {"A": 1+1j}, Solver.GLPK)
+        assert False
+    except MissingVariableException:
+        assert True
+    
+    try:
+        model.solve([{"A": 1}], {}, Solver.GLPK)
+        assert False
+    except MissingVariableException:
+        assert True
+    
+    assert len(model.solve([{}], {}, Solver.GLPK)) == 1
+
+def test_delete_should_fail_if_dependencies_exists():
+    # If the id requested for deletion is referenced by another composite
+    # then it should NOT be possible to delete it.
+
+    # This case should work
+    model = PLDAG()
+    model.set_primitives("xyz")
+    id = model.set_and("xyz")
+    model.delete(id)
+
+    # This case should NOT work
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_and("xyz")
+    try:
+        model.delete("x")
+        assert False
+    except IsReferencedException:
+        assert True
+
+    # This case should NOT work
+    model = PLDAG()
+    model.set_primitives("xyz")
+    deletion_id = model.set_and("xy")
+    _id = model.set_or([
+        deletion_id,
+        model.set_and("xz")
+    ])
+    try:
+        model.delete(deletion_id)
+        assert False
+    except IsReferencedException:
+        assert True
+
+    # But removing top node before should work
+    model.delete(_id)
+    model.delete(deletion_id)
