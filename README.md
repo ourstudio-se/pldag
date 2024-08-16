@@ -36,7 +36,7 @@ assert model.propagate({"x": 1+1j, "y": 1+1j, "z": 1j}).get(id_ref) == 1j
 assert model.propagate({"x": 1+1j, "y": 1+1j, "z": 0j}).get(id_ref) == 0j
 ```
 
-There's also a quick way to use a solver. There's no built-in solver but is dependent on existing once. Before using, reinstall the package with the solver variable set to the solver you'd want to use
+There's also a quick way to use a solver. There's no built-in solver but is dependent on existing ones. Before using, reinstall the package with the solver variable set to the solver you'd want to use
 ```bash
 pip install pldag[glpk]
 ``` 

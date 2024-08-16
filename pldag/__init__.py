@@ -217,25 +217,27 @@ class PLDAG:
             # Set equal many composite flags as new composites
             self._cvec = np.append(self._cvec, np.ones(len(new_composites), dtype=bool))
 
-        # Update the amap with the ALL composites
-        # There may be existing once which only wants to add new aliases
-        all_ids, _, _, aliases = zip(*self._buffer)
-        self._amap.update(
-            dict(
-                filter(
-                    lambda x: x[0] is not None,
-                    zip(
-                        aliases,
-                        all_ids,
+            # Update the amap with the ALL composites
+            # There may be existing once which only wants to add new aliases
+            all_ids, _, _, aliases = zip(*self._buffer)
+            self._amap.update(
+                dict(
+                    filter(
+                        lambda x: x[0] is not None,
+                        zip(
+                            aliases,
+                            all_ids,
+                        )
                     )
                 )
             )
-        )
 
-        # Clear the buffer
-        self._buffer = []
+            # Clear the buffer
+            self._buffer = []
 
-        return all_ids
+            return all_ids
+        
+        return []
 
     
     def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None) -> str:

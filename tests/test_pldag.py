@@ -515,3 +515,19 @@ def test_on_demand_compiling_setting():
     model.compile()
     result = model.propagate({"x": 1+1j, "y": 1+1j})
     assert result.get(root) == 1+1j
+
+def test_compile_on_empty_buffer_should_not_fail():
+
+    model = PLDAG(compilation_setting=CompilationSetting.INSTANT)
+    model.compile()
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.compile()
+
+    model = PLDAG(compilation_setting=CompilationSetting.INSTANT)
+    model.set_primitive("x", 1+1j)
+    model.compile()
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitive("x", 1+1j)
+    model.compile()
