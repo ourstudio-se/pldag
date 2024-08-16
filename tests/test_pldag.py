@@ -559,3 +559,17 @@ def test_compile_missing_composite_should_fail_with_missing_variabel_exception()
         assert False
     except MissingCompositeException:
         assert True
+
+def test_revert_if_compilation_fails():
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitives("xyz")
+
+    copy_of_model = model.copy()
+
+    try:
+        model.set_and("abc")
+        model.compile()
+        assert False
+    except FailedToCompileException:
+        assert model == copy_of_model

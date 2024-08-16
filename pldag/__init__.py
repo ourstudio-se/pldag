@@ -25,6 +25,9 @@ class MissingCompositeException(MissingVariableException):
     def __init__(self, composite: str):
         super().__init__(f"Composite '{composite}' is missing.")
 
+class FailedToCompileException(Exception):
+    pass
+
 class Solver(Enum):
     GLPK = "glpk"
 
@@ -179,6 +182,11 @@ class PLDAG:
     def compile(self):
         """
             Compiles the model - sets all buffered constraints.
+
+            Raises
+            ------
+            FailedToCompileException
+                If the model failed to compile.
         """
         new_composites = list(
             filter(
@@ -188,70 +196,89 @@ class PLDAG:
         )
         if new_composites:
 
-            ids, coefficient_variables, biases, _ = zip(*new_composites)
+            # Copy the model to be able to revert if compilation fails
+            copy_of_self = self.copy()
 
-            # Pad the matrix with equal many rows and columns as new composites
-            self._amat = np.pad(self._amat, ((0, len(new_composites)), (0, len(new_composites))), mode='constant')
+            try:
 
-            # Update the imap with the new composites
-            self._imap.update(
-                dict(
-                    zip(
-                        ids,
-                        range(self._amat.shape[1] - len(new_composites), self._amat.shape[1])
+                ids, coefficient_variables, biases, _ = zip(*new_composites)
+
+                # Pad the matrix with equal many rows and columns as new composites
+                self._amat = np.pad(self._amat, ((0, len(new_composites)), (0, len(new_composites))), mode='constant')
+
+                # Update the imap with the new composites
+                self._imap.update(
+                    dict(
+                        zip(
+                            ids,
+                            range(self._amat.shape[1] - len(new_composites), self._amat.shape[1])
+                        )
                     )
-                )
-            ) 
+                ) 
 
-            # Create a rows/columns/values array from the buffer
-            rcv = np.array(
-                list(
-                    chain(
-                        *starmap(
-                            lambda irow, cvs: list(
-                                starmap(
-                                    lambda v, c: (
-                                        irow,
-                                        self._col(v),
-                                        c
-                                    ),
-                                    cvs
+                # Create a rows/columns/values array from the buffer
+                rcv = np.array(
+                    list(
+                        chain(
+                            *starmap(
+                                lambda irow, cvs: list(
+                                    starmap(
+                                        lambda v, c: (
+                                            irow,
+                                            self._col(v),
+                                            c
+                                        ),
+                                        cvs
+                                    )
+                                ), 
+                                zip(
+                                    range(self._amat.shape[0] - len(new_composites), self._amat.shape[0]), 
+                                    coefficient_variables,
                                 )
-                            ), 
-                            zip(
-                                range(self._amat.shape[0] - len(new_composites), self._amat.shape[0]), 
-                                coefficient_variables,
                             )
                         )
                     )
                 )
-            )
-            if rcv.size:
-                self._amat[rcv.T[0], rcv.T[1]] = rcv.T[2]
+                if rcv.size:
+                    self._amat[rcv.T[0], rcv.T[1]] = rcv.T[2]
 
-            # Set d values
-            self._dvec = np.append(self._dvec, np.zeros(len(new_composites), dtype=complex) + complex(0, 1))
+                # Set d values
+                self._dvec = np.append(self._dvec, np.zeros(len(new_composites), dtype=complex) + complex(0, 1))
 
-            # Set all biases from the buffer
-            self._bvec = np.append(self._bvec, np.array(list(map(lambda bias: complex(bias, bias), biases))))
+                # Set all biases from the buffer
+                self._bvec = np.append(self._bvec, np.array(list(map(lambda bias: complex(bias, bias), biases))))
 
-            # Set equal many composite flags as new composites
-            self._cvec = np.append(self._cvec, np.ones(len(new_composites), dtype=bool))
+                # Set equal many composite flags as new composites
+                self._cvec = np.append(self._cvec, np.ones(len(new_composites), dtype=bool))
 
-            # Update the amap with the ALL composites
-            # There may be existing once which only wants to add new aliases
-            all_ids, _, _, aliases = zip(*self._buffer)
-            self._amap.update(
-                dict(
-                    filter(
-                        lambda x: x[0] is not None,
-                        zip(
-                            aliases,
-                            all_ids,
+                # Update the amap with the ALL composites
+                # There may be existing once which only wants to add new aliases
+                all_ids, _, _, aliases = zip(*self._buffer)
+                self._amap.update(
+                    dict(
+                        filter(
+                            lambda x: x[0] is not None,
+                            zip(
+                                aliases,
+                                all_ids,
+                            )
                         )
                     )
                 )
-            )
+
+            except Exception as e:
+
+                # Revert the model
+                self._amat = copy_of_self._amat
+                self._dvec = copy_of_self._dvec
+                self._bvec = copy_of_self._bvec
+                self._cvec = copy_of_self._cvec
+                self._imap = copy_of_self._imap
+                self._amap = copy_of_self._amap
+                self._compilation_setting = copy_of_self._compilation_setting
+                self._buffer = []
+
+                raise FailedToCompileException(e)
 
             # Clear the buffer
             self._buffer = []
@@ -1281,184 +1308,3 @@ class PLDAG:
             )
         )
     
-from dataclasses import dataclass, field
-    
-@dataclass
-class Variable:
-    id: str
-    bound: complex
-    properties: dict = field(default_factory=dict)
-    alias: Optional[str] = None
-
-@dataclass
-class Solution:
-    
-    variables: List[Variable]
-
-    def __getitem__(self, key: str) -> Variable:
-        return next(
-            filter(
-                lambda x: x.id == key,
-                self.variables
-            )
-        )
-    
-    def find(self, predicate: Callable[[Variable], bool]) -> List[str]:
-        return list(
-            filter(
-                predicate,
-                self.variables
-            )
-        )
-    
-class Puan(PLDAG):
-
-    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT):
-        super().__init__(compilation_setting)
-        self.data: dict = {}
-
-    def copy(self) -> "Puan":
-        new_model = Puan()
-        new_model._amat = self._amat.copy()
-        new_model._dvec = self._dvec.copy()
-        new_model._bvec = self._bvec.copy()
-        new_model._cvec = self._cvec.copy()
-        new_model._imap = self._imap.copy()
-        new_model._amap = self._amap.copy()
-        new_model.data = self.data.copy()
-        return new_model
-
-    def set_meta(self, id: str, props: dict):
-        self.data.setdefault(id, {}).update(props)
-
-    def del_meta(self, id: str, key: str):
-        self.data[id].pop(key, None)
-
-    def set_primitive(self, id: str, properties: dict = {}, bound: complex = complex(0,1)) -> str:
-        self.set_meta(id, properties)
-        return super().set_primitive(id, bound)
-    
-    def set_primitives(self, ids: List[str], properties: dict = {}, bound: complex = complex(0,1)) -> List[str]:
-        return list(
-            map(
-                lambda x: self.set_primitive(x, properties, bound),
-                ids
-            )
-        )
-
-    def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_gelineq(coefficient_variables, bias, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_atmost(self, children: List[str], value: int, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_atmost(children, value, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_atleast(self, children: List[str], value: int, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_atleast(children, value, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_and(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_and(children, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_or(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_or(children, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_not(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_not(children, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_xor(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_xor(children, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_xnor(self, children: List[str], alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_xnor(children, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_equal(references, value, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_equiv(lhs, rhs, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def set_imply(self, antecedent: str, consequent: str, alias: Optional[str] = None, properties: dict = {}) -> str:
-        id = super().set_imply(antecedent, consequent, alias)
-        self.set_meta(id, properties)
-        return id
-    
-    def find(self, predicate: Callable[[str, Any], bool]) -> Set[str]:
-        return set(
-            map(
-                lambda x: x[0],
-                filter(
-                    lambda x: any(
-                        starmap(
-                            predicate,
-                            x[1].items()
-                        )
-                    ),
-                    self.data.items()
-                )
-            )
-        )
-    
-    def solve(self, objectives: List[dict], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True, minimize: bool = True) -> List[dict]:
-        return list(
-            map(
-                lambda solution: Solution(
-                    variables=list(
-                        starmap(
-                            lambda k,v: Variable(k, v, self.data.get(k), self.id_to_alias(k) or None),
-                            solution.items()
-                        )
-                    )
-                ),
-                super().solve(objectives, assume, solver, double_bind_constraints, minimize)
-            )
-        )
-    
-    def propagate(self, query: dict = {}, freeze: bool = True) -> Solution:
-        return Solution(
-            variables=list(
-                starmap(
-                    lambda k,v: Variable(k, v, self.data.get(k), self.id_to_alias(k) or None),
-                    super().propagate(query, freeze).items()
-                )
-            )
-        )
-    
-    @staticmethod
-    def from_super(super_model: PLDAG) -> 'Puan':
-        new_model = Puan()
-        new_model._amat = super_model._amat
-        new_model._dvec = super_model._dvec
-        new_model._bvec = super_model._bvec
-        new_model._cvec = super_model._cvec
-        new_model._imap = super_model._imap
-        new_model._amap = super_model._amap
-        return new_model
-    
-    def sub(self, roots: List[str], max_iterations: int = 1000) -> 'Puan':
-        new_model = self.from_super(super().sub(roots, max_iterations))
-        new_model.data = dict(filter(lambda k: k[0] in new_model._imap, self.data.items()))
-        return new_model
-        
-    def cut(self, cuts: Dict[str, str]) -> "Puan":
-        new_model = self.from_super(super().cut(cuts))
-        new_model.data = dict(filter(lambda k: k[0] in new_model._imap, self.data.items()))
-        return new_model
