@@ -3,7 +3,7 @@ from pldag import *
 from hypothesis import given, strategies
 
 def composite_coefficient_variables():
-    return strategies.tuples(
+    return strategies.dictionaries(
         strategies.text(),
         strategies.integers(min_value=-5, max_value=5),
     )
@@ -14,7 +14,7 @@ def composite_proposition_strategy():
         First element is the children, second bias and third if negated or not.
     """
     return strategies.tuples(
-        strategies.sets(composite_coefficient_variables(), min_size=1, max_size=5),
+        composite_coefficient_variables(),
         strategies.integers(min_value=-5, max_value=5),
     )
 
@@ -95,49 +95,23 @@ def test_delete():
     model._amat.shape == (0,0)
     model._dvec.shape == (0,)
 
-    model.set_primitives(["x", "y", "z"])
-    model.set_atleast(["x", "y", "z"], 1)
+    try:
+        model.set_primitives(["x", "y", "z"])
+        model.set_atleast(["x", "y", "z"], 1)
+        model.delete("z")
+        assert False
+    except IsReferencedException:
+        pass
+
+    model.delete(model.set_atleast(["x", "y", "z"], 1))
     model.delete("z")
     assert len(model.primitives) == 2
-    assert len(model.composites) == 1
+    assert len(model.composites) == 0
     assert len(model._amap) == 0
-    assert len(model._imap) == 3
-    assert max(model._imap.values()) == 2
-    assert model._amat.shape == (1, 3)
-    assert model._dvec.shape == (3,)
-
-    model = PLDAG()
-    model.set_primitives("xyz")
-    removed_id = model.set_xor(["x", "z"])
-    affected_id = model.set_and([removed_id, model.set_xor(["x", "y"])])
-    # Deleting this one should do that the previous one
-    # could never be satisfied
-    assert model.propagate().get(affected_id) == 1j
-    model.delete(removed_id)
-    assert model.propagate().get(affected_id) == 0j
-    
-    model = PLDAG()
-    model.set_primitives("xyz")
-    removed_id1 = model.set_xor(["x", "z"])
-    removed_id2 = model.set_xor(["x", "y"])
-    affected_id = model.set_or([removed_id1, removed_id2])
-    assert model.propagate().get(affected_id) == 1j
-    model.delete(removed_id)
-    assert model.propagate().get(affected_id) == 1j
-    model.delete(removed_id2)
-    assert model.propagate().get(affected_id) == 0j
-    
-    model = PLDAG()
-    model.set_primitives("xyz")
-    removed_id1 = model.set_xor(["x", "z"])
-    removed_id2 = model.set_xor(["x", "y"])
-    affected_id = model.set_atmost([removed_id1, removed_id2], 1)
-    assert model.propagate().get(affected_id) == 1j
-    model.delete(removed_id)
-    assert model.propagate().get(affected_id) == 1+1j
-    model.delete(removed_id2)
-    assert model.propagate().get(affected_id) == 1+1j
-
+    assert len(model._imap) == 2
+    assert max(model._imap.values()) == 1
+    assert model._amat.shape == (0, 2)
+    assert model._dvec.shape == (2,)
 
 
 def test_integer_bounds():
@@ -571,7 +545,7 @@ def test_revert_if_compilation_fails():
         model.set_and("abc")
         model.compile()
         assert False
-    except FailedToCompileException:
+    except MissingVariableException:
         assert model == copy_of_model
 
 def test_solve_missing_variable_should_fail():
@@ -580,18 +554,18 @@ def test_solve_missing_variable_should_fail():
     model.set_primitives("xyz")
     model.set_atleast("xyz", 1)
     try:
-        model.solve([{}], {"A": 1+1j}, Solver.GLPK)
+        model.solve([{}], {"A": 1+1j}, Solver.DEFAULT)
         assert False
     except MissingVariableException:
         assert True
     
     try:
-        model.solve([{"A": 1}], {}, Solver.GLPK)
+        model.solve([{"A": 1}], {}, Solver.DEFAULT)
         assert False
     except MissingVariableException:
         assert True
     
-    assert len(model.solve([{}], {}, Solver.GLPK)) == 1
+    assert len(model.solve([{}], {}, Solver.DEFAULT)) == 1
 
 def test_delete_should_fail_if_dependencies_exists():
     # If the id requested for deletion is referenced by another composite
@@ -630,3 +604,14 @@ def test_delete_should_fail_if_dependencies_exists():
     # But removing top node before should work
     model.delete(_id)
     model.delete(deletion_id)
+
+def test_buffer_is_empty_after_compile_except_when_on_error():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_and("xyz")
+    model.compile()
+    assert len(model._buffer) == 0
+    model.set_and("xyz")
+    model.compile()
+    assert len(model._buffer) == 0

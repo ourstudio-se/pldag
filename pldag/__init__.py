@@ -2,7 +2,7 @@ import numpy as np
 from hashlib import sha1
 from itertools import groupby, starmap, chain
 from functools import partial, lru_cache
-from typing import Dict, List, Set, Optional, Callable, Any, Tuple
+from typing import Dict, List, Set, Optional, Any, Tuple
 from graphlib import TopologicalSorter
 
 from enum import Enum
@@ -34,7 +34,7 @@ class FailedToCompileException(Exception):
     pass
 
 class Solver(Enum):
-    GLPK = "glpk"
+    DEFAULT = "default"
 
 class CompilationSetting(str, Enum):
     """
@@ -110,11 +110,11 @@ class PLDAG:
         ).static_order()
     
     @staticmethod
-    def _composite_id(coefficient_variables: List[Tuple[str,int]], bias: int) -> str:
+    def _composite_id(coefficients: Dict[str,int], bias: int) -> str:
         """
             Create a composite ID from a list of children.
         """
-        return sha1(("".join(map(lambda x: str(x), sorted(set(coefficient_variables)))) + str(bias)).encode()).hexdigest()
+        return sha1(("".join(map(lambda x: str(x), sorted(set(coefficients.items())))) + str(bias)).encode()).hexdigest()
     
     @property
     def primitives(self) -> np.ndarray:
@@ -183,6 +183,15 @@ class PLDAG:
             return self.composites.tolist().index(id)
         except ValueError:
             raise MissingCompositeException(id)
+        
+    def revert_from(self, model: "PLDAG") -> None:
+        self._amat = model._amat
+        self._dvec = model._dvec
+        self._bvec = model._bvec
+        self._cvec = model._cvec
+        self._imap = model._imap
+        self._amap = model._amap
+        self._compilation_setting = model._compilation_setting
     
     def compile(self):
         """
@@ -193,6 +202,7 @@ class PLDAG:
             FailedToCompileException
                 If the model failed to compile.
         """
+        all_ids = []
         new_composites = list(
             filter(
                 lambda x: x[0] not in self._imap, 
@@ -206,7 +216,7 @@ class PLDAG:
 
             try:
 
-                ids, coefficient_variables, biases, _ = zip(*new_composites)
+                ids, coefficients, biases, _ = zip(*new_composites)
 
                 # Pad the matrix with equal many rows and columns as new composites
                 self._amat = np.pad(self._amat, ((0, len(new_composites)), (0, len(new_composites))), mode='constant')
@@ -233,12 +243,12 @@ class PLDAG:
                                             self._col(v),
                                             c
                                         ),
-                                        cvs
+                                        cvs.items()
                                     )
                                 ), 
                                 zip(
                                     range(self._amat.shape[0] - len(new_composites), self._amat.shape[0]), 
-                                    coefficient_variables,
+                                    coefficients,
                                 )
                             )
                         )
@@ -271,36 +281,27 @@ class PLDAG:
                     )
                 )
 
+            except MissingVariableException as e:
+                self.revert_from(copy_of_self)
+                raise e
             except Exception as e:
-
-                # Revert the model
-                self._amat = copy_of_self._amat
-                self._dvec = copy_of_self._dvec
-                self._bvec = copy_of_self._bvec
-                self._cvec = copy_of_self._cvec
-                self._imap = copy_of_self._imap
-                self._amap = copy_of_self._amap
-                self._compilation_setting = copy_of_self._compilation_setting
-                self._buffer = []
-
+                self.revert_from(copy_of_self)
                 raise FailedToCompileException(e)
-
-            # Clear the buffer
-            self._buffer = []
-
-            return all_ids
+            
+        # Clear the buffer
+        self._buffer = []
         
-        return []
+        return all_ids
 
     
-    def set_gelineq(self, coefficient_variables: List[Tuple[str, int]], bias: int, alias: Optional[str] = None) -> str:
+    def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None) -> str:
         """
             Sets a linear inequality constraint, ax + by + cz + bias >= 0.
 
             Parameters
             ----------
-            coefficient_variables : List[Tuple[str, int]]
-                The variables and their coefficients. For instance, [("x", 1), ("y", 1), ("z", 1)].
+            coefficients : Dict[str, int]
+                The variables and their coefficients. For instance, {"x": 1, "y": 1, "z": 1}].
 
             bias : int
                 The bias of the constraint.
@@ -312,7 +313,7 @@ class PLDAG:
             --------
             >>> model = PLDAG()
             >>> model.set_primitives("xyz")
-            >>> model.set_gelineq([("x", 1), ("y", 1), ("z", 1)], -3)
+            >>> model.set_gelineq({"x": 1, "y": 1, "z": 1}, -3)
             da4ab8efc9b188b591115c3f376d0bc1ac6481ca
 
             Returns
@@ -320,8 +321,11 @@ class PLDAG:
             str
                 The ID of the constraint.
         """
-        _id = self._composite_id(coefficient_variables, bias)
-        self._buffer.append((_id, coefficient_variables, bias, alias))
+        _id = self._composite_id(
+            coefficients,
+            bias
+        )
+        self._buffer.append((_id, coefficients, bias, alias))
         
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
@@ -756,7 +760,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(list(map(lambda r: (r, 1), references)), -1 * value, alias)
+        return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias)
     
     def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
         """
@@ -783,7 +787,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(list(map(lambda r: (r, -1), references)), value, alias)
+        return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias)
     
     def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
         """
@@ -1283,7 +1287,7 @@ class PLDAG:
             >>> model = PLDAG()
             >>> model.set_primitives("xyz")
             >>> a = model.set_atleast("xyz", 1)
-            >>> model.solve([{"x": 0, "y": 1, "z": 0}], {}, Solver.GLPK)
+            >>> model.solve([{"x": 0, "y": 1, "z": 0}], {}, Solver.DEFAULT)
             [{'x': 0j, 'y': 1+1j, 'z': 0j}]
 
             Returns
@@ -1297,8 +1301,8 @@ class PLDAG:
         for i, obj in enumerate(objectives):
             obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
 
-        if solver == Solver.GLPK:
-            from pldag.solver.glpk_solver import solve_lp
+        if solver == Solver.DEFAULT:
+            from pldag.solver.default_solver import solve_lp
             solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()), minimize=minimize)
         else:
             raise ValueError(f"Solver `{solver}` not installed.")

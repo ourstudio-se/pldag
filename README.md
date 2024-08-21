@@ -46,7 +46,7 @@ And then you can use it like following
 from pldag import Solver
 
 # Maximize [x=1, y=0, z=0] such that rules in model holds and variable `id_ref` must be true.
-solution = next(iter(model.solve(objectives=[{"x": 1}], assume={id_ref: 1+1j}, solver=Solver.GLPK)))
+solution = next(iter(model.solve(objectives=[{"x": 1}], assume={id_ref: 1+1j}, solver=Solver.DEFAULT)))
 
 # Since x=1 and `id_ref` must be set (i.e. all(x,y,z) must be true), we could expect all variables
 # be set.
