@@ -36,6 +36,9 @@ class FailedToCompileException(Exception):
 class FailedToRebuildException(Exception):
     pass
 
+class IsCorruptException(Exception):
+    pass
+
 class Solver(Enum):
     DEFAULT = "default"
 
@@ -191,13 +194,21 @@ class PLDAG:
         """
         return sha1(("".join(map(lambda x: str(x), sorted(set(coefficients.items())))) + str(bias)).encode()).hexdigest()
     
+    def _corruption_middleware_runner(self, f, *args, **kwargs):
+        try:
+            return f(self, *args, **kwargs)
+        except Exception as e:
+            if self.is_corrupt():
+                raise IsCorruptException("Model is corrupt. Run `try_rebuild`.")
+            raise e
+    
     @property
     def primitives(self) -> np.ndarray:
-        return self._col_vars[~self._cvec]
+        return self._corruption_middleware_runner(lambda s: s._col_vars[~s._cvec])
     
     @property
     def composites(self) -> np.ndarray:
-        return self._col_vars[self._cvec]
+        return self._corruption_middleware_runner(lambda s: s._col_vars[s._cvec])
     
     @property
     def columns(self) -> np.ndarray:
@@ -223,7 +234,7 @@ class PLDAG:
     
     @property
     def _row_vars(self) -> np.ndarray:
-        return np.array(list(self._imap.keys()))[self._cvec]
+        return self._corruption_middleware_runner(lambda s: np.array(list(s._imap.keys()))[s._cvec])
     
     @property
     def _inner_bounds(self) -> np.ndarray:

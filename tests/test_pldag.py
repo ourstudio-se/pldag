@@ -638,3 +638,34 @@ def test_toposort_property():
     b=model.set_or("xyz")
     assert list(filter(lambda x: x not in model.primitives, model._toposort)) == [a, b]
     
+def test_corruption_middleware_function():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_and("xyz")
+    del model._imap["x"]
+
+    for f, args, kwargs in [
+        (
+            getattr,
+            (model, "primitives"),
+            {}
+        ),
+        (
+            getattr,
+            (model, "composites"),
+            {}
+        ),
+        (
+            getattr,
+            (model, "_row_vars"),
+            {}
+        ),
+    ]:
+        try:
+            f(*args, **kwargs)
+            assert False
+        except IsCorruptException:
+            assert True
+        except Exception:
+            assert False
