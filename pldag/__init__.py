@@ -1,8 +1,8 @@
 import numpy as np
 from hashlib import sha1
-from itertools import groupby, starmap, chain
+from itertools import groupby, starmap, chain, count
 from functools import partial, lru_cache
-from typing import Dict, List, Set, Optional, Any, Tuple
+from typing import Dict, List, Set, Optional, Tuple
 from graphlib import TopologicalSorter
 
 from enum import Enum
@@ -31,6 +31,9 @@ class IsReferencedException(Exception):
         super().__init__(f"Variable '{variable_id}' is referenced by other composites.")
 
 class FailedToCompileException(Exception):
+    pass
+
+class FailedToRebuildException(Exception):
     pass
 
 class Solver(Enum):
@@ -100,11 +103,83 @@ class PLDAG:
     
     @property
     def _toposort(self) -> iter:
+
+        """
+            Topological sort of the adjacency matrix with composite and primitive names, bottoms-up.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> model.set_and("xyz")
+            >>> list(model._toposort)
+            ['x', 'z', 'y', 'da4ab8efc9b188b591115c3f376d0bc1ac6481ca']
+
+            Returns
+            -------
+            iter
+                The topological order.
+        """
+
         return TopologicalSorter(
             dict(
                 map(
-                    lambda x: (x[0], set(map(lambda y: y[1], x[1]))), 
-                    groupby(np.argwhere(self._amat), key=lambda x: x[0])
+                    lambda x: (
+                        x[0], 
+                        set(map(lambda y: y[1], x[1]))
+                    ), 
+                    groupby(
+                        starmap(
+                            lambda x,y: (
+                                self._irow(x), 
+                                self._icol(y),
+                            ),
+                            np.argwhere(self._amat), 
+                        ),
+                        key=lambda x: x[0]
+                    )
+                )
+            )
+        ).static_order()
+    
+    @property
+    def _toposort_idx(self) -> iter:
+        
+        """
+            Topological sort of the adjacency matrix with composite and primitive indices, bottoms-up.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> model.set_and("xyz")
+            >>> list(model._toposort)
+            [0, 1, 2, 3]
+
+            Returns
+            -------
+            iter
+                The topological order.
+        """
+
+        col_con_vec = np.argwhere(self._cvec).T[0]
+        return TopologicalSorter(
+            dict(
+                map(
+                    lambda x: (
+                        x[0], 
+                        set(map(lambda y: y[1], x[1]))
+                    ), 
+                    groupby(
+                        starmap(
+                            lambda x,y: (
+                                col_con_vec[x], 
+                                y,
+                            ),
+                            np.argwhere(self._amat), 
+                        ),
+                        key=lambda x: x[0]
+                    )
                 )
             )
         ).static_order()
@@ -192,6 +267,71 @@ class PLDAG:
         self._imap = model._imap
         self._amap = model._amap
         self._compilation_setting = model._compilation_setting
+
+    def is_corrupt(self) -> bool:
+        """
+            Checks if the model is corrupt.
+
+            Returns
+            -------
+            bool
+                True if the model is corrupt, False otherwise.
+        """
+        return not (
+            (len(self._imap) == self._amat.shape[1]) and
+            (len(self._imap) == len(self._dvec)) and
+            (self._amat.shape[1] == self._cvec.size) and
+            (self._amat.shape[0] == self._bvec.size)
+        )
+    
+    def try_rebuild(self) -> "PLDAG":
+        """
+            Try to rebuild the model.
+
+            Raises
+            ------
+            FailedToRebuildException
+                If the model failed to rebuild.
+
+            Returns
+            -------
+            PLDAG
+                The rebuilt model.
+        """
+        if not (
+            # Checks that all matrices and vectors correspond in size
+            (self._amat.shape[1] == self._dvec.size) and
+            (self._amat.shape[1] == self._cvec.size) and
+            (self._amat.shape[0] == self._bvec.size)
+        ):
+            raise FailedToRebuildException()
+
+        # Rebuilds bottoms up, starting with the first composites (right above primitive layer)
+        # and continues upwards until all composites are rebuilt
+        rev_new_imap = self._revimap.copy()
+        ji_corr_map = dict(zip(np.argwhere(self._cvec).T[0], count()))
+        for j in filter(lambda i: self._cvec[i], self._toposort_idx):
+            i = ji_corr_map[j]
+            a_msk = self._amat[i] != 0
+            a_idxs = np.argwhere(a_msk).T[0]
+            coefficients = dict(
+                zip(
+                    map(rev_new_imap.get, a_idxs),
+                    self._amat[i, a_idxs]
+                )
+            )
+            id = self._composite_id(coefficients, int(self._bvec[i].real))
+            rev_new_imap[j] = id
+
+        rebuilt_model = self.copy()
+        rebuilt_model._imap = dict(map(lambda x: (x[1], x[0]), rev_new_imap.items()))
+        rebuilt_model._amap = dict(filter(lambda x: x[1] in rebuilt_model._imap, self._amap.items()))
+
+        # Test if the model is corrupt
+        if rebuilt_model.is_corrupt():
+            raise FailedToRebuildException()
+
+        return rebuilt_model
     
     def compile(self):
         """

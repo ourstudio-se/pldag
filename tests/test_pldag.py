@@ -615,3 +615,26 @@ def test_buffer_is_empty_after_compile_except_when_on_error():
     model.set_and("xyz")
     model.compile()
     assert len(model._buffer) == 0
+
+def test_try_rebuild_model():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    a=model.set_and("xyz", alias="C")
+    model.set_primitives("abc")
+    b=model.set_and("abc", alias="B")
+    model.set_xor([a,b], alias="A")
+    _imap = model._imap.copy()
+    _amap = model._amap.copy()
+    model.try_rebuild()
+    assert _imap == model._imap
+    assert _amap == model._amap
+
+def test_toposort_property():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    a=model.set_and("xyz")
+    b=model.set_or("xyz")
+    assert list(filter(lambda x: x not in model.primitives, model._toposort)) == [a, b]
+    
