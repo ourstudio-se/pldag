@@ -1446,30 +1446,45 @@ class PLDAG:
             List[Dict[str, complex]]
                 The solutions for the objectives.
         """
-        A, b = self.to_polyhedron(double_binding=double_bind_constraints, **assume)
-        variables = self._col_vars
-        obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
-        for i, obj in enumerate(objectives):
-            obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
-
-        if solver == Solver.DEFAULT:
-            from pldag.solver.default_solver import solve_lp
-            solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()), minimize=minimize)
-        else:
-            raise ValueError(f"Solver `{solver}` not installed.")
-        
-        return list(
-            map(
-                lambda solution: dict(
-                    zip(
-                        variables, 
-                        map(
-                            lambda i: complex(i,i),
-                            solution
-                        )
-                    )
-                ),
-                solutions
+        if self._amat.shape == (0,0):
+            return list(
+                map(
+                    lambda _: {},
+                    range(len(objectives))
+                )
             )
-        )
-    
+        
+        else:
+            A, b = self.to_polyhedron(double_binding=double_bind_constraints, **assume)
+
+            # If no constraints, we add a dummy constraint
+            if A.shape[0] == 0:
+                A = np.append(A, [np.zeros(A.shape[1], dtype=np.int64)], axis=0)
+                b = np.append(b, 0)
+
+            variables = self._col_vars
+            obj_mat = np.zeros((len(objectives), len(variables)), dtype=np.int64)
+            for i, obj in enumerate(objectives):
+                obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
+
+            if solver == Solver.DEFAULT:
+                from pldag.solver.default_solver import solve_lp
+                solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()), minimize=minimize)
+            else:
+                raise ValueError(f"Solver `{solver}` not installed.")
+            
+            return list(
+                map(
+                    lambda solution: dict(
+                        zip(
+                            variables, 
+                            map(
+                                lambda i: complex(i,i),
+                                solution
+                            )
+                        )
+                    ),
+                    solutions
+                )
+            )
+        

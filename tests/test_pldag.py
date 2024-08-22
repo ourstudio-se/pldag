@@ -669,3 +669,11 @@ def test_corruption_middleware_function():
             assert True
         except Exception:
             assert False
+
+def test_solve_empty_model_should_return_empty_list_or_empty_solutions():
+
+    model = PLDAG()
+    assert len(model.solve([{}], {}, Solver.DEFAULT)) == 1
+
+    model.set_primitives("xyz")
+    assert len(model.solve([{}], {}, Solver.DEFAULT)) == 1
