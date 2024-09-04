@@ -1,9 +1,12 @@
 import numpy as np
+
 from hashlib import sha1
 from itertools import groupby, starmap, chain, count
 from functools import partial, lru_cache
 from typing import Dict, List, Set, Optional, Tuple
 from graphlib import TopologicalSorter
+from pickle import dumps, loads, HIGHEST_PROTOCOL
+from gzip import compress, decompress
 
 from enum import Enum
 
@@ -444,7 +447,6 @@ class PLDAG:
         
         return all_ids
 
-    
     def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None) -> str:
         """
             Sets a linear inequality constraint, ax + by + cz + bias >= 0.
@@ -1488,3 +1490,18 @@ class PLDAG:
                 )
             )
         
+    def dump(self) -> bytes:
+        """
+            Dump the model to compressed bytes.
+        """
+        return compress(dumps((set(vars(self).keys()), self), protocol=HIGHEST_PROTOCOL), mtime=0)
+    
+    @staticmethod
+    def load(data: bytes) -> 'PLDAG':
+        """
+            Load the model from compressed bytes.
+        """
+        version_attrs, model = loads(decompress(data))
+        if version_attrs != set(vars(PLDAG()).keys()):
+            raise ValueError(f"Version mismatch.")
+        return model

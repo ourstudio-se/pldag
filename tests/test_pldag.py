@@ -677,3 +677,15 @@ def test_solve_empty_model_should_return_empty_list_or_empty_solutions():
 
     model.set_primitives("xyz")
     assert len(model.solve([{}], {}, Solver.DEFAULT)) == 1
+
+def test_dump_load():
+    model = PLDAG()
+    model.set_primitive("a", -5+3j)
+    model.set_primitive("b", 2j)
+    model.set_primitive("c", -4+4j)
+    model.set_primitive("d", -4+5j)
+    model.set_primitive("e", 1j)
+    model.set_atleast("be", 3, alias="A")
+    model.set_atleast("abcd", -9, alias="B")
+    model.set_atmost("abcd", 5, alias="C")
+    assert model == PLDAG.load(model.dump())
