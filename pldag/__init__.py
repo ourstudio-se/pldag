@@ -86,13 +86,17 @@ class PLDAG:
         return hash(self.sha1())
     
     def __eq__(self, other: "PLDAG") -> bool:
-        return (self.sha1() == other.sha1()
-                and np.array_equal(self._amat, other._amat)
-                and np.array_equal(self._dvec, other._dvec)
-                and np.array_equal(self._bvec, other._bvec)
-                and np.array_equal(self._cvec, other._cvec)
-                and self._imap == other._imap
-                and self._amap == other._amap)
+        return (
+            self.sha1() == other.sha1()
+            and np.array_equal(self._amat, other._amat)
+            and np.array_equal(self._dvec, other._dvec)
+            and np.array_equal(self._bvec, other._bvec)
+            and np.array_equal(self._cvec, other._cvec)
+            and self._imap == other._imap
+            and self._amap == other._amap
+            and self._compilation_setting == other._compilation_setting
+            and self._buffer == other._buffer
+        )
 
     def sha1(self) -> str:
         return sha1(("".join(self._imap.keys()) + "".join(map(lambda c: f"{c.real}{c.imag}", self._dvec))).encode()).hexdigest()
@@ -1505,3 +1509,18 @@ class PLDAG:
         if version_attrs != set(vars(PLDAG()).keys()):
             raise ValueError(f"Version mismatch.")
         return model
+    
+    def to_file(self, filename: str):
+        """
+            Dump the model to a file.
+        """
+        with open(filename, "wb") as f:
+            f.write(self.dump())
+
+    @staticmethod
+    def from_file(filename: str) -> 'PLDAG':
+        """
+            Load the model from a file.
+        """
+        with open(filename, "rb") as f:
+            return PLDAG.load(f.read())
