@@ -344,6 +344,47 @@ def test_sub():
     expected_included = ["m1", "m2", model.set_or(["m1", "m2"]), model.set_atmost(["m1", "m2"], 1), model.set_xor(["m1", "m2"])]
     assert all(map(lambda id: id in sub_model._imap, expected_included))
     assert all(map(lambda x: x not in sub_model._imap, set(model.columns) - set(expected_included)))
+    
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitives(["m1","m2","c1","c2","e1","e2","e3","g1","g2"])
+    model.set_and([
+        model.set_xor(["m1","m2"]),
+        model.set_xor(["c1","c2"]),
+        model.set_xor(["e1","e2","e3"]),
+        model.set_imply("m1", model.set_or(["e1", "e2"])),
+        model.set_imply("m2", model.set_or(["e1", "e3"])),
+        model.set_imply(model.set_or(["e1", "e2"]), "g1"),
+        model.set_imply("e3", "g2"),
+    ])
+    model.compile()
+    sub_model = model.sub([model.set_xor(["m1","m2"])])
+    expected_included = ["m1", "m2", model.set_or(["m1", "m2"]), model.set_atmost(["m1", "m2"], 1), model.set_xor(["m1", "m2"])]
+    assert all(map(lambda id: id in sub_model._imap, expected_included))
+    assert all(map(lambda x: x not in sub_model._imap, set(model.columns) - set(expected_included)))
+
+    model1 = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model1.set_primitives(["x","y"])
+    id=model1.set_and(["x","y"])
+    model1.set_primitive("z")
+    top=model1.set_and([id, "z"])
+    model1.compile()
+    sub_model = model1.sub([id])
+    assert all(map(lambda x: x in sub_model.primitives, ["x", "y"]))
+    assert not "z" in sub_model.primitives
+    assert id in sub_model.composites
+    assert not top in sub_model.composites
+
+    model = PLDAG()
+    model.set_primitives(["x","y"])
+    id=model.set_and(["x","y"])
+    model.set_primitive("z")
+    top=model.set_and([id, "z"])
+    sub_model = model.sub([id])
+    assert all(map(lambda x: x in sub_model.primitives, ["x", "y"]))
+    assert not "z" in sub_model.primitives
+    assert id in sub_model.composites
+    assert not top in sub_model.composites
+
 
 def test_cut():
     model = PLDAG()
@@ -485,7 +526,7 @@ def test_on_demand_compiling_setting():
     assert root not in model._imap
     result = model.propagate()
     assert root not in result
-    assert "x" in result
+    assert "x" not in result
     model.compile()
     result = model.propagate({"x": 1+1j, "y": 1+1j})
     assert result.get(root) == 1+1j
@@ -538,7 +579,7 @@ def test_revert_if_compilation_fails():
 
     model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
     model.set_primitives("xyz")
-
+    model.compile()
     copy_of_model = model.copy()
 
     try:

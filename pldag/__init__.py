@@ -80,7 +80,7 @@ class PLDAG:
         # Compilation setting
         self._compilation_setting = compilation_setting
         # Buffer for constraints
-        self._buffer = []
+        self._buffer = {}
 
     def __hash__(self) -> int:
         return hash(self.sha1())
@@ -95,7 +95,6 @@ class PLDAG:
             and self._imap == other._imap
             and self._amap == other._amap
             and self._compilation_setting == other._compilation_setting
-            and self._buffer == other._buffer
         )
 
     def sha1(self) -> str:
@@ -228,7 +227,14 @@ class PLDAG:
     @property
     def adjacency_matrix(self) -> np.ndarray:
         """Get the adjacency matrix"""
-        return np.vstack((np.zeros((self._amat.shape[1]-self._amat.shape[0], self._amat.shape[1])), self._amat))
+        # Initialize a zero matrix with size len(columns) x len(columns)
+        extended_matrix = np.zeros((self._amat.shape[1], self._amat.shape[1]))
+        
+        # Add the existing rows to the correct positions in the extended matrix
+        for i,row in enumerate(self.composites):
+            extended_matrix[self._col(row), :] = self._amat[i, :]
+        
+        return extended_matrix
     
     @property
     def _revimap(self) -> dict:
@@ -361,10 +367,34 @@ class PLDAG:
                 If the model failed to compile.
         """
         all_ids = []
-        new_composites = list(
+        primitives = list(
             filter(
-                lambda x: x[0] not in self._imap, 
-                self._buffer,
+                lambda x: len(x[1][0]) == 0,
+                self._buffer.items()
+            )
+        )
+
+        # Set all primitives
+        # Set first the existing ids
+        existing_ids = list(filter(lambda x: x in self._imap, map(lambda x: x[0], primitives)))
+        if existing_ids:
+            self._dvec[[self._col(x) for x in existing_ids]] = list(map(lambda x: x[1][2], primitives))
+
+        # Then add the new ids
+        new_ids = list(filter(lambda x: x not in self._imap, map(lambda x: x[0], primitives)))
+        if new_ids:
+            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=np.int64)))
+            self._dvec = np.append(self._dvec, np.array(list(map(lambda x: x[1][2], primitives))))
+            self._cvec = np.append(self._cvec, np.array([False] * len(new_ids)))
+            self._imap.update(dict(zip(new_ids, range(self._amat.shape[1] - len(new_ids), self._amat.shape[1]))))
+
+        new_composites = list(
+            starmap(
+                lambda k,v: (k, ) + v,
+                filter(
+                    lambda x: (x[0] not in self._imap) and len(x[1][0]) > 0, 
+                    self._buffer.items(),
+                )
             )
         )
         if new_composites:
@@ -374,7 +404,7 @@ class PLDAG:
 
             try:
 
-                ids, coefficients, biases, _ = zip(*new_composites)
+                ids, coefficients, biases, _, _ = zip(*new_composites)
 
                 # Pad the matrix with equal many rows and columns as new composites
                 self._amat = np.pad(self._amat, ((0, len(new_composites)), (0, len(new_composites))), mode='constant')
@@ -425,8 +455,8 @@ class PLDAG:
                 self._cvec = np.append(self._cvec, np.ones(len(new_composites), dtype=bool))
 
                 # Update the amap with the ALL composites
-                # There may be existing once which only wants to add new aliases
-                all_ids, _, _, aliases = zip(*self._buffer)
+                # There may be existing ones which only wants to add new aliases
+                all_ids, _, _, _, aliases = zip(*starmap(lambda k,v: (k,) + v, self._buffer.items()))
                 self._amap.update(
                     dict(
                         filter(
@@ -447,7 +477,7 @@ class PLDAG:
                 raise FailedToCompileException(e)
             
         # Clear the buffer
-        self._buffer = []
+        self._buffer = {}
         
         return all_ids
 
@@ -482,7 +512,7 @@ class PLDAG:
             coefficients,
             bias
         )
-        self._buffer.append((_id, coefficients, bias, alias))
+        self._buffer[_id] = (coefficients, bias, 1j, alias)
         
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
@@ -839,14 +869,10 @@ class PLDAG:
             str
                 The ID of the primitive variable.
         """
-        if id in self._imap:
-            # Update value if already in map
-            self._dvec[self._col(id)] = bound
-        else:
-            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], 1), dtype=np.int64)))
-            self._dvec = np.append(self._dvec, bound)
-            self._cvec = np.append(self._cvec, False)
-            self._imap[id] = self._amat.shape[1] - 1
+
+        self._buffer[id] = ({}, None, bound, None)
+        if self._compilation_setting == CompilationSetting.INSTANT:
+            self.compile()
 
         return id
 
@@ -877,18 +903,8 @@ class PLDAG:
             List[str]
                 The IDs of the primitive variables.
         """
-        # Set first the existing ids
-        existing_ids = list(filter(lambda x: x in self._imap, ids))
-        if existing_ids:
-            self._dvec[[self._col(x) for x in existing_ids]] = bound
-
-        # Then add the new ids
-        new_ids = list(filter(lambda x: x not in self._imap, ids))
-        if new_ids:
-            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=np.int64)))
-            self._dvec = np.append(self._dvec, np.array([bound] * len(new_ids)))
-            self._cvec = np.append(self._cvec, np.array([False] * len(new_ids)))
-            self._imap.update(dict(zip(new_ids, range(self._amat.shape[1] - len(new_ids), self._amat.shape[1]))))
+        for id in ids:
+            self.set_primitive(id, bound)
                                
         return ids
     
