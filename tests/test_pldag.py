@@ -75,44 +75,6 @@ def test_propagate():
     assert res.get(c) == 0j
     assert res.get(a) == 0j
 
-def test_delete():
-    
-    model = PLDAG()
-    model.set_primitive("x")
-    model.delete("x")
-    assert len(model.primitives) == 0
-    assert len(model._amap) == 0
-    assert len(model._imap) == 0
-    model._amat.shape == (0,0)
-    model._dvec.shape == (0,)
-    
-    model = PLDAG()
-    model.set_primitives("xyz")
-    model.delete(*"xyz")
-    assert len(model.primitives) == 0
-    assert len(model._amap) == 0
-    assert len(model._imap) == 0
-    model._amat.shape == (0,0)
-    model._dvec.shape == (0,)
-
-    try:
-        model.set_primitives(["x", "y", "z"])
-        model.set_atleast(["x", "y", "z"], 1)
-        model.delete("z")
-        assert False
-    except IsReferencedException:
-        pass
-
-    model.delete(model.set_atleast(["x", "y", "z"], 1))
-    model.delete("z")
-    assert len(model.primitives) == 2
-    assert len(model.composites) == 0
-    assert len(model._amap) == 0
-    assert len(model._imap) == 2
-    assert max(model._imap.values()) == 1
-    assert model._amat.shape == (0, 2)
-    assert model._dvec.shape == (2,)
-
 
 def test_integer_bounds():
 
@@ -196,11 +158,19 @@ def test_propagate_query_second():
     }).get(a) == 1j
 
 def test_dependencies():
-    model = PLDAG() 
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND) 
     model.set_primitives("xyz")
+    d = model.set_xor(["x", "y", "z"])
+    model.compile()
+    
+    # Check that silent variables are not included in the dependencies
+    assert model.dependencies(d) == {"x", "y", "z"}
+    
     c=model.set_atmost(["x"], 0)
     b=model.set_atleast(["y", "z"], 2)
     a=model.set_atleast([b,c], 1)
+    model.compile()
     assert model.dependencies(a) == {c,b}
     assert model.dependencies(b) == {"y", "z"}
     assert model.dependencies(c) == {"x"}
@@ -607,44 +577,6 @@ def test_solve_missing_variable_should_fail():
         assert True
     
     assert len(model.solve([{}], {}, Solver.DEFAULT)) == 1
-
-def test_delete_should_fail_if_dependencies_exists():
-    # If the id requested for deletion is referenced by another composite
-    # then it should NOT be possible to delete it.
-
-    # This case should work
-    model = PLDAG()
-    model.set_primitives("xyz")
-    id = model.set_and("xyz")
-    model.delete(id)
-
-    # This case should NOT work
-    model = PLDAG()
-    model.set_primitives("xyz")
-    model.set_and("xyz")
-    try:
-        model.delete("x")
-        assert False
-    except IsReferencedException:
-        assert True
-
-    # This case should NOT work
-    model = PLDAG()
-    model.set_primitives("xyz")
-    deletion_id = model.set_and("xy")
-    _id = model.set_or([
-        deletion_id,
-        model.set_and("xz")
-    ])
-    try:
-        model.delete(deletion_id)
-        assert False
-    except IsReferencedException:
-        assert True
-
-    # But removing top node before should work
-    model.delete(_id)
-    model.delete(deletion_id)
 
 def test_buffer_is_empty_after_compile_except_when_on_error():
 

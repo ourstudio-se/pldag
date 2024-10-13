@@ -1,5 +1,6 @@
 import numpy as np
 
+from enum import Enum
 from hashlib import sha1
 from itertools import groupby, starmap, chain, count
 from functools import partial, lru_cache
@@ -7,8 +8,6 @@ from typing import Dict, List, Set, Optional, Tuple
 from graphlib import TopologicalSorter
 from pickle import dumps, loads, HIGHEST_PROTOCOL
 from gzip import compress, decompress
-
-from enum import Enum
 
 class NoSolutionsException(Exception):
     pass
@@ -73,6 +72,10 @@ class PLDAG:
         self._bvec = np.zeros((0, ),    dtype=complex)
         # Boolean vector indicating if the node is a composition
         self._cvec = np.zeros((0, ),    dtype=bool)
+        # Keeps track of silent variables. Size is equal to the number of columns.
+        self._svec = np.zeros((0, ),    dtype=bool)
+        # Keeps track of variable type. Size is equal to the number of columns.
+        self._tvec = np.empty((0, ),    dtype=object)
         # Maps id's to index
         self._imap = {}
         # Alias to id mapping
@@ -92,6 +95,8 @@ class PLDAG:
             and np.array_equal(self._dvec, other._dvec)
             and np.array_equal(self._bvec, other._bvec)
             and np.array_equal(self._cvec, other._cvec)
+            and np.array_equal(self._svec, other._svec)
+            and np.array_equal(self._tvec, other._tvec)
             and self._imap == other._imap
             and self._amap == other._amap
             and self._compilation_setting == other._compilation_setting
@@ -213,6 +218,10 @@ class PLDAG:
         return self._corruption_middleware_runner(lambda s: s._col_vars[~s._cvec])
     
     @property
+    def integer_primitives(self) -> np.ndarray:
+        return self.columns[(self._dvec.real != 0) | (self._dvec.imag != 1)]
+    
+    @property
     def composites(self) -> np.ndarray:
         return self._corruption_middleware_runner(lambda s: s._col_vars[s._cvec])
     
@@ -290,6 +299,8 @@ class PLDAG:
         self._cvec = model._cvec
         self._imap = model._imap
         self._amap = model._amap
+        self._svec = model._svec
+        self._tvec = model._tvec
         self._compilation_setting = model._compilation_setting
 
     def is_corrupt(self) -> bool:
@@ -305,7 +316,9 @@ class PLDAG:
             (len(self._imap) == self._amat.shape[1]) and
             (len(self._imap) == len(self._dvec)) and
             (self._amat.shape[1] == self._cvec.size) and
-            (self._amat.shape[0] == self._bvec.size)
+            (self._amat.shape[0] == self._bvec.size) and
+            (self._amat.shape[1] == self._svec.size) and
+            (self._amat.shape[1] == self._tvec.size)
         )
     
     def try_rebuild(self) -> "PLDAG":
@@ -326,7 +339,9 @@ class PLDAG:
             # Checks that all matrices and vectors correspond in size
             (self._amat.shape[1] == self._dvec.size) and
             (self._amat.shape[1] == self._cvec.size) and
-            (self._amat.shape[0] == self._bvec.size)
+            (self._amat.shape[0] == self._bvec.size) and
+            (self._amat.shape[1] == self._svec.size) and
+            (self._amat.shape[1] == self._tvec.size)
         ):
             raise FailedToRebuildException()
 
@@ -386,6 +401,8 @@ class PLDAG:
             self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=np.int64)))
             self._dvec = np.append(self._dvec, np.array(list(map(lambda x: x[1][2], primitives))))
             self._cvec = np.append(self._cvec, np.array([False] * len(new_ids)))
+            self._svec = np.append(self._svec, np.array([False] * len(new_ids)))
+            self._tvec = np.append(self._tvec, np.array(["primitive"] * len(new_ids)))
             self._imap.update(dict(zip(new_ids, range(self._amat.shape[1] - len(new_ids), self._amat.shape[1]))))
 
         new_composites = list(
@@ -404,7 +421,7 @@ class PLDAG:
 
             try:
 
-                ids, coefficients, biases, _, _ = zip(*new_composites)
+                ids, coefficients, biases, _, _, silents, types = zip(*new_composites)
 
                 # Pad the matrix with equal many rows and columns as new composites
                 self._amat = np.pad(self._amat, ((0, len(new_composites)), (0, len(new_composites))), mode='constant')
@@ -454,9 +471,15 @@ class PLDAG:
                 # Set equal many composite flags as new composites
                 self._cvec = np.append(self._cvec, np.ones(len(new_composites), dtype=bool))
 
+                # Set equal many silent flags as new composites
+                self._svec = np.append(self._svec, np.array(silents))
+
+                # Set equal many types as new composites
+                self._tvec = np.append(self._tvec, np.array(types))
+
                 # Update the amap with the ALL composites
                 # There may be existing ones which only wants to add new aliases
-                all_ids, _, _, _, aliases = zip(*starmap(lambda k,v: (k,) + v, self._buffer.items()))
+                all_ids, _, _, _, aliases, _, _ = zip(*starmap(lambda k,v: (k,) + v, self._buffer.items()))
                 self._amap.update(
                     dict(
                         filter(
@@ -481,7 +504,7 @@ class PLDAG:
         
         return all_ids
 
-    def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None) -> str:
+    def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "lineq") -> str:
         """
             Sets a linear inequality constraint, ax + by + cz + bias >= 0.
 
@@ -493,8 +516,14 @@ class PLDAG:
             bias : int
                 The bias of the constraint.
 
-            alias : Optional[str]
+            alias : Optional[str] (default=None)
                 The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="lineq")
+                The type of the constraint.
 
             Examples
             --------
@@ -512,7 +541,7 @@ class PLDAG:
             coefficients,
             bias
         )
-        self._buffer[_id] = (coefficients, bias, 1j, alias)
+        self._buffer[_id] = (coefficients, bias, 1j, alias, silent, ttype)
         
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
@@ -730,7 +759,9 @@ class PLDAG:
         model._amat = self._amat.copy()
         model._dvec = self._dvec.copy()
         model._bvec = self._bvec.copy()
+        model._svec = self._svec.copy()
         model._cvec = self._cvec.copy()
+        model._tvec = self._tvec.copy()
         model._imap = self._imap.copy()
         model._amap = self._amap.copy()
         return model
@@ -739,41 +770,6 @@ class PLDAG:
         """Get the bounds of the given ID(s)"""
         return self._dvec[list(map(self._col, id))]
     
-    def delete(self, *id: str) -> bool:
-        """
-            Delete the given ID.
-        """
-        if len(id)>1:
-            return list(map(self.delete, id))
-        id = id[0]
-
-        # Check if id is referenced by other composites
-        if (self._amat[:, self._col(id)] != 0).any():
-            raise IsReferencedException(id)
-
-        try:
-            if id in self.composites:
-                row_id = self._row(id)
-                self._bvec = np.delete(self._bvec, row_id)
-                self._amap = dict(filter(lambda x: x[1] != id, self._amap.items()))
-                self._amat = np.delete(self._amat, row_id, axis=0)
-
-            col_id = self._col(id)
-            self._amat = np.delete(self._amat, col_id, axis=1)
-            self._dvec = np.delete(self._dvec, col_id)
-            self._cvec = np.delete(self._cvec, col_id)
-            del self._imap[id]
-            self._imap = dict(
-                zip(
-                    self._imap.keys(),
-                    range(len(self._imap))
-                )
-            )
-
-            return True
-        except:
-            return False
-    
     def exists(self, id: str) -> bool:
         """Check if the given id exists"""
         return (id in self._imap)
@@ -781,11 +777,32 @@ class PLDAG:
     def dependencies(self, id: str) -> Set[str]:
         """
             Get the dependencies of the given ID.
+
+            Parameters
+            ----------
+            id : str
+                The ID of the variable.
+
+            NOTE: This function is recursive will ignore silent variables by default.
         """
+        if not self.exists(id):
+            raise MissingVariableException(id)
+        
+        if not self._cvec[self._col(id)]:
+            return set()
+        
+        variables = list(self._imap)
+        idxs = np.argwhere(self._amat[self._row(id)] != 0).T[0]
         return set(
-            map(
-                lambda x: list(self._imap)[x],
-                np.argwhere(self._amat[self._row(id)] != 0).T[0]
+            chain(
+                map(
+                    lambda x: variables[x],
+                    filter(lambda x: not self._svec[x], idxs)
+                ),
+                *map(
+                    lambda x: self.dependencies(variables[x]),
+                    filter(lambda x: self._svec[x], idxs)
+                )
             )
         )
     
@@ -870,7 +887,7 @@ class PLDAG:
                 The ID of the primitive variable.
         """
 
-        self._buffer[id] = ({}, None, bound, None)
+        self._buffer[id] = ({}, None, bound, None, False, "primitive")
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
 
@@ -908,7 +925,7 @@ class PLDAG:
                                
         return ids
     
-    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
+    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atleast") -> str:
         """
             Add a composite constraint of at least `value`.
 
@@ -919,6 +936,15 @@ class PLDAG:
 
             value : int
                 The minimum value to set.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="atleast")
+                The type of the constraint.
 
             Examples
             --------
@@ -933,9 +959,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias)
+        return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias, silent, ttype)
     
-    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
+    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atmost") -> str:
         """
             Add a composite constraint of at most `value`.
 
@@ -946,6 +972,15 @@ class PLDAG:
 
             value : int
                 The maximum value to set.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttpe : str (default="lineq")
+                The type of the constraint.
 
             Examples
             --------
@@ -960,9 +995,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias)
+        return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias, silent=silent, ttype=ttype)
     
-    def set_or(self, references: List[str], alias: Optional[str] = None) -> str:
+    def set_or(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "or") -> str:
         """
             Add a composite constraint of an OR operation.
 
@@ -970,6 +1005,15 @@ class PLDAG:
             ----------
             references : List[str]
                 The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction
+
+            ttype : str (default="or")
+                The type of the constraint.
 
             Examples
             --------
@@ -984,9 +1028,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(references, 1, alias)
+        return self.set_atleast(references, 1, alias, silent, ttype)
     
-    def set_and(self, references: List[str], alias: Optional[str] = None) -> str:
+    def set_and(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "and") -> str:
         """
             Add a composite constraint of an AND operation.
 
@@ -994,6 +1038,15 @@ class PLDAG:
             ----------
             references : List[str]
                 The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="and")
+                The type of the constraint.
 
             Examples
             --------
@@ -1008,9 +1061,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(set(references), len(set(references)), alias)
+        return self.set_atleast(set(references), len(set(references)), alias, silent, ttype)
     
-    def set_not(self, references: List[str], alias: Optional[str] = None) -> str:
+    def set_not(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "not") -> str:
         """
             Add a composite constraint of a NOT operation.
 
@@ -1018,6 +1071,15 @@ class PLDAG:
             ----------
             references : List[str]
                 The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="not")
+                The type of the constraint.
 
             Examples
             --------
@@ -1032,9 +1094,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atmost(references, 0, alias)
+        return self.set_atmost(references, 0, alias, silent, ttype)
     
-    def set_xor(self, references: List[str], alias: Optional[str] = None) -> str:
+    def set_xor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "xor") -> str:
         """
             Add a composite constraint of an XOR operation.
 
@@ -1042,6 +1104,12 @@ class PLDAG:
             ----------
             references : List[str]
                 The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
 
             Examples
             --------
@@ -1057,11 +1125,11 @@ class PLDAG:
                 The ID of the composite constraint.
         """
         return self.set_and([
-            self.set_atleast(references, 1),
-            self.set_atmost(references, 1),
-        ], alias)
+            self.set_atleast(references, 1, silent=True),
+            self.set_atmost(references, 1, silent=True),
+        ], alias, silent, ttype)
     
-    def set_xnor(self, references: List[str], alias: Optional[str] = None) -> str:
+    def set_xnor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "xnor") -> str:
         """
             Add a composite constraint of an XNOR operation.
 
@@ -1069,6 +1137,15 @@ class PLDAG:
             ----------
             references : List[str]
                 The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttpe : str (default="xnor")
+                The type of the constraint.
 
             Examples
             --------
@@ -1083,9 +1160,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_not([self.set_xor(references)], alias)
+        return self.set_not([self.set_xor(references, silent=True)], alias, silent, ttype)
     
-    def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None) -> str:
+    def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None, silent: bool = False, ttype: str = "imply") -> str:
         """
             Add a composite constraint of an IMPLY operation.
 
@@ -1096,6 +1173,15 @@ class PLDAG:
 
             consequence : str
                 The reference to the consequence.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="imply")
+                The type of the constraint
 
             Examples
             --------
@@ -1116,9 +1202,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_or([self.set_not([condition]), consequence], alias)
+        return self.set_or([self.set_not([condition], silent=True), consequence], alias, silent, ttype)
 
-    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None) -> str:
+    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "equal") -> str:
         """
             Add a composite constraint of an EQUAL operation: sum(references) == value.
 
@@ -1130,17 +1216,26 @@ class PLDAG:
             value : int
                 The value to be equal.
 
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="equal")
+                The type of the constraint.
+
             Returns
             -------
             str
                 The ID of the composite constraint.
         """
         return self.set_and([
-            self.set_atleast(references, value),
-            self.set_atmost(references, value),
-        ], alias)
+            self.set_atleast(references, value, silent=True),
+            self.set_atmost(references, value, silent=True),
+        ], alias, silent, ttype)
     
-    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None) -> str:
+    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None, silent: bool = False, ttype: str = "equiv") -> str:
         """
             Add a composite constraint of an EQUIVALENCE operation, lhs <-> rhs.
             It is equivalent to set_and([set_imply(lhs, rhs), set_imply(rhs, lhs)]).
@@ -1153,18 +1248,27 @@ class PLDAG:
             rhs : str
                 The right-hand side reference.
 
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="equiv")
+                The type of the constraint.
+
             Returns
             -------
             str
                 The ID of the composite constraint.
         """
         return self.set_or([
-            self.set_and([lhs, rhs]),
-            self.set_not([lhs, rhs]),
-        ], alias)
+            self.set_and([lhs, rhs], silent=True),
+            self.set_not([lhs, rhs], silent=True),
+        ], alias, silent, ttype)
     
     @lru_cache
-    def to_polyhedron(self, double_binding: bool = True, **assume: Dict[str, complex]) -> tuple:
+    def to_polyhedron(self, double_binding: bool = True, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
 
         """
             Constructs a polyhedron of matrix A and bias vector b,
@@ -1252,15 +1356,14 @@ class PLDAG:
             key=lambda x: x[1]
         ):
             v = list(map(lambda x: x[0], vs))
-            a = np.zeros(A.shape[1], dtype=np.int64)
-            a[np.array(list(map(self._col, v)))] = 1
-            if i > 0 or i < 0:
-                _b = a.sum() * i
-            else:
-                _b = 0
-
-            A = np.vstack([A, a])
-            b = np.append(b, _b)
+            v_idx = list(map(self._col, v))
+            
+            # Force both upper and lower bound to be the same
+            for j in [-1,1]:
+                a = np.zeros(A.shape[1], dtype=np.int64) * j
+                a[v_idx] = 1 * j
+                A = np.vstack([A, a])
+                b = np.append(b, a.sum() * i)
 
         # Set bounds for integer variables
         int_vars = list(set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
@@ -1331,6 +1434,7 @@ class PLDAG:
         sub_model._dvec = self._dvec[col_idxs]
         sub_model._bvec = self._bvec[row_idxs]
         sub_model._cvec = self._cvec[col_idxs]
+        sub_model._svec = self._svec[row_idxs]
         sub_model._imap = dict(map(lambda x: (x[1], x[0]), enumerate(self._col_vars[col_idxs])))
         sub_model._amap = dict(filter(lambda x: x[1] in sub_model._imap, self._amap.items()))
         return sub_model
@@ -1434,7 +1538,15 @@ class PLDAG:
         """
         return self.cut(cuts).sub(roots)
     
-    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver, double_bind_constraints: bool = True, minimize: bool = True) -> List[Dict[str, complex]]:
+    def solve(
+            self, 
+            objectives: List[Dict[str, int]], 
+            assume: Dict[str, complex], 
+            solver: Solver, 
+            double_bind_constraints: bool = True, 
+            minimize: bool = False,
+            reduce: bool = True,
+        ) -> List[Dict[str, complex]]:
         """
             Solves the model with the given objectives.
 
@@ -1454,6 +1566,12 @@ class PLDAG:
                 1 ) -dA + x + y + z >= 0
                 2 ) +mA - x - y - z >= -1
                 Saying that if A is 1 then x, y and z must be 1, and if A is 0 then x, y and z must be 0.
+
+            minimize: bool = False
+                If the objectives should be minimized.
+
+            reduce: bool = True
+                If the model should be reduced before solving.
 
             Examples
             --------
@@ -1540,3 +1658,92 @@ class PLDAG:
         """
         with open(filename, "rb") as f:
             return PLDAG.load(f.read())
+        
+    def to_json(self) -> list:
+        """
+            Dump the model to JSON.
+        """
+        primitives = self.primitives
+        composites = self.composites
+        return list(
+            chain(
+                map(
+                    lambda primitive: {
+                        "id": primitive,
+                        "type": "primitive",
+                        "bound": {
+                            "lower": int(self._dvec[self._col(primitive)].real),
+                            "upper": int(self._dvec[self._col(primitive)].imag),
+                        },
+                    },
+                    filter(
+                        lambda variable: variable in primitives,
+                        self._imap.keys()
+                    )
+                ),
+                map(
+                    lambda composite: {
+                        "id": composite,
+                        "type": "composite",
+                        "bound": {
+                            "lower": int(self._dvec[self._col(composite)].real),
+                            "upper": int(self._dvec[self._col(composite)].imag),
+                        },
+                        "children": list(
+                            map(
+                                lambda i_child: {
+                                    "id": self._icol(i_child),
+                                    "coef": int(self._amat[self._row(composite), i_child]),
+                                },
+                                np.argwhere(self._amat[self._row(composite)] != 0).T[0]
+                            )
+                        ),
+                    },
+                    filter(
+                        lambda variable: variable in composites,
+                        self._imap.keys()
+                    )
+                )
+            )
+        )
+    
+    @staticmethod
+    def from_json(data: list) -> 'PLDAG':
+        """
+            Load the model from JSON.
+        """
+        model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+        for item in data:
+            if item["type"] == "primitive":
+                model.set_primitive(item["id"], complex(item["bound"]["lower"], item["bound"]["upper"]))
+            elif item["type"] == "composite":
+                model.set_gelineq(
+                    dict(
+                        map(
+                            lambda child: (child["id"], child["coef"]),
+                            item["children"]
+                        )
+                    ),
+                    item["bound"]["lower"],
+                    item["id"]
+                )
+        model.compile()
+        return model
+    
+    def no_outgoing_edges(self) -> np.ndarray:
+        """
+            Get the nodes with no outgoing edges.
+        """
+        return self.columns[(self._amat == 0).all(axis=0)]
+    
+    def no_incoming_edges(self) -> np.ndarray:
+        """
+            Get the nodes with no incoming edges.
+        """
+        return np.append(self.primitives, self.composites[(self._amat == 0).all(axis=1)])
+    
+    def no_edges(self) -> np.ndarray:
+        """
+            Get the nodes with no incoming or outgoing edges.
+        """
+        return np.array(set(self.no_outgoing_edges()).intersection(self.no_incoming_edges()))
