@@ -1030,6 +1030,31 @@ class PLDAG:
         """
         return self.set_atleast(references, 1, alias, silent, ttype)
     
+    def set_nor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nor") -> str:
+        """
+            Add a composite constraint of an N(ot)OR operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction
+
+            ttype : str (default="or")
+                The type of the constraint.
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self.set_not([self.set_or(references, silent=True)], alias, silent, ttype)
+    
     def set_and(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "and") -> str:
         """
             Add a composite constraint of an AND operation.
@@ -1062,6 +1087,31 @@ class PLDAG:
                 The ID of the composite constraint.
         """
         return self.set_atleast(set(references), len(set(references)), alias, silent, ttype)
+    
+    def set_nand(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nand") -> str:
+        """
+            Add a composite constraint of an N(ot)AND operation.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="and")
+                The type of the constraint.
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self.set_not([self.set_and(references, silent=True)], alias, silent, ttype)
     
     def set_not(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "not") -> str:
         """
