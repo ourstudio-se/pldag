@@ -1797,3 +1797,244 @@ class PLDAG:
             Get the nodes with no incoming or outgoing edges.
         """
         return np.array(set(self.no_outgoing_edges()).intersection(self.no_incoming_edges()))
+
+
+class PDLite:
+
+    def __init__(self):
+        # The actual A matrix in a polyhedron (A, b)
+        self._amat = np.zeros((0, 0),   dtype=np.int64)
+        # The actual b vector in a polyhedron (A, b)
+        self._bvec = np.zeros(0,        dtype=np.int64)
+        # The bounds vector
+        self._dvec = np.zeros(0,        dtype=np.complex128)
+        # Keeps track of variable type. Size is equal to the number of rows in A.
+        self._tvec = np.empty((0, ),    dtype=object)
+        # Buffer for new variables/constraints
+        self._buffer = {}
+        # Index map for rows
+        self._rmap = {}
+        # Index map for columns
+        self._imap = {}
+
+    @property
+    def columns(self) -> list:
+        return list(self._imap.keys())
+    
+    @property
+    def rows(self) -> list:
+        return list(self._rmap.keys())
+    
+    def _col(self, k: str) -> int:
+        return self._imap[k]
+    
+    def _row(self, k: str) -> int:
+        return self._rmap[k]
+
+    def set_primitive(self, id: str, bound: complex = complex(0,1)) -> List[str]:
+        self._buffer[id] = ({}, None, bound, None, False, "primitive")
+        return id
+
+    def set_primitives(self, ids: str, bound: complex = complex(0,1)) -> list:
+        for id in ids:
+            self.set_primitive(id, bound)
+        return ids
+
+    def set_gelineq(self, references: Dict[str, int], value: int, alias: Optional[str] = None, ttype: str = "gelineq") -> List[str]:
+        data = (references, alias, value, None, False, ttype)
+        id = sha1(dumps(data)).hexdigest()
+        self._buffer[id] = data
+        return [id]
+
+    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, ttype: str = "atleast", and_condition: List[str] = []) -> List[str]:
+        if and_condition:
+            k = -1 * len(references)
+            bias = -value -k
+            crefs = dict(chain(map(lambda r: (r, 1), references), map(lambda r: (r, k), and_condition)))
+            return self.set_gelineq(crefs, bias, alias, ttype)
+        else:
+            return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias, ttype)
+
+    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, ttype: str = "atmost", and_condition: List[str] = []) -> List[str]:
+        if and_condition:
+            k = -1 * len(references)
+            bias = value -k
+            crefs = dict(chain(map(lambda r: (r, -1), references), map(lambda r: (r, k), and_condition)))
+            return self.set_gelineq(crefs, bias, alias, ttype)
+        else:
+            return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias, ttype)
+
+    def set_and(self, references: List[str], alias: Optional[str] = None, ttype: str = "and", and_condition: List[str] = []) -> List[str]:
+        return self.set_atleast(references, len(references), alias, ttype, and_condition)
+
+    def set_or(self, references: List[str], alias: Optional[str] = None, ttype: str = "or", and_condition: List[str] = []) -> List[str]:
+        return self.set_atleast(references, 1, alias, ttype, and_condition)
+
+    def set_not(self, references: List[str], alias: Optional[str] = None, ttype: str = "not", and_condition: List[str] = []) -> List[str]:   
+        return self.set_atmost(references, 0, alias, ttype, and_condition)
+    
+    def set_xor(self, references: List[str], alias: Optional[str] = None, ttype: str = "xor", and_condition: List[str] = []) -> List[str]:
+        return [
+            self.set_or(references, alias, ttype, and_condition)[0],
+            self.set_atmost(references, 1, alias, ttype, and_condition)[0],
+        ]
+
+    def compile(self):
+        
+        # Set primitives first
+        primitives = dict(filter(lambda x: len(x[1][0]) == 0, self._buffer.items()))
+        if primitives:
+            self._amat = np.pad(self._amat, ((0, 0), (0, len(primitives))), mode='constant', constant_values=0)
+            self._dvec = np.append(self._dvec, list(map(lambda x: x[2], primitives.values())))
+            self._imap = {**self._imap, **dict(zip(primitives, range(max(self._imap.values(), default=0), len(primitives))))}
+
+        # Set composites
+        composites = dict(filter(lambda x: len(x[1][0]) > 0, self._buffer.items()))
+        if composites:
+            _A = np.zeros((len(composites), self._amat.shape[1]))
+            _b = np.zeros(len(composites))
+
+            for i, composite in enumerate(composites):
+                for ref, coef in composites[composite][0].items():
+                    _A[i, self._imap[ref]] = coef
+                _b[i] = composites[composite][2]
+
+            self._amat = np.vstack([self._amat, _A])
+            self._bvec = np.append(self._bvec, _b)
+            self._tvec = np.append(self._tvec, list(map(lambda x: x[5], composites.values())))
+            self._rmap = {**self._rmap, **dict(zip(composites, range(max(self._rmap.values(), default=0), len(composites))))}
+
+    @lru_cache
+    def to_polyhedron(self, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
+
+        """
+            Constructs a polyhedron of matrix A and bias vector b,
+            such that A.dot(x) >= b, where x is the vector of variables.
+            Every composite variable A is its own column in the matrix where
+            A -> (A's composite proposition) is true. 
+
+            Parameters
+            ----------
+            assume : Dict[str, int]
+                A dictionary of variables to assume tighter bounds.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xyz")
+            >>> a = model.set_atleast("xyz", 1)
+            >>> A, b = model.to_polyhedron()
+            >>> np.array_equal(A, np.array([[1,1,1]]))
+            >>> np.array_equal(b, np.array([1]))
+            True
+        """
+
+        # References to Polyhedron.md explaining the construction of the matrix A and bias vector b
+        # Create the matrix and support vector (-1 * bias)
+        A = self._amat.copy().astype(np.int64)
+        b = -1 * self._bvec.copy().real.astype(np.int64)
+
+        # Fix constant variables
+        for i, vs in groupby(
+            sorted(
+                map(
+                    lambda x: (x[0], int(x[1].real)), 
+                    filter(
+                        lambda x: x[1].real == x[1].imag, 
+                        assume.items()
+                    )
+                ),
+                key=lambda x: x[1] 
+            ), 
+            key=lambda x: x[1]
+        ):
+            v = list(map(lambda x: x[0], vs))
+            v_idx = list(map(self._col, v))
+            
+            # Force both upper and lower bound to be the same
+            for j in [-1,1]:
+                a = np.zeros(A.shape[1], dtype=np.int64) * j
+                a[v_idx] = 1 * j
+                A = np.vstack([A, a])
+                b = np.append(b, a.sum() * i)
+
+        # Set bounds for integer variables
+        int_vars = list(set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
+
+        # Declare new constraints for upper and lower bound for integer variables
+        A_int = np.zeros((len(int_vars) * 2, A.shape[1]), dtype=np.int64)
+        b_int = np.zeros((len(int_vars) * 2, ), dtype=np.int64)
+
+        # Setup dvec as real and imag parts
+        d_real = self._dvec.real
+        d_imag = self._dvec.imag
+
+        # Also, if fix has tighter bounds set we use them instead
+        for i, bound in filter(
+            lambda x: (x[1].real != x[1].imag), 
+            starmap(
+                lambda k,v: (self._col(k), v),
+                assume.items()
+            )
+        ):
+            if bound.real > d_real[i]:
+                d_real[i] = bound.real
+            elif bound.imag < d_imag[i]:
+                d_imag[i] = bound.imag
+        
+        # Lower bound for integers..
+        A_int[np.arange(len(int_vars) * 2, step=2), int_vars] = 1
+        b_int[np.arange(len(int_vars) * 2, step=2)] = d_real[int_vars]
+        
+        # Upper bound for integers..
+        A_int[np.arange(len(int_vars) * 2, step=2) + 1, int_vars] = -1
+        b_int[np.arange(len(int_vars) * 2, step=2) + 1] = -1 * d_imag[int_vars]
+
+        # Add them onto polyhedron
+        A = np.vstack([A, A_int])
+        b = np.append(b, b_int)
+
+        return A, b
+    
+    def solve(self, objectives: List[Dict[str, int]], assume: Dict[str, complex], solver: Solver, minimize: bool = False):
+        if self._amat.shape == (0,0):
+            return list(
+                map(
+                    lambda _: {},
+                    range(len(objectives))
+                )
+            )
+        
+        else:
+            A, b = self.to_polyhedron(**assume)
+
+            # If no constraints, we add a dummy constraint
+            if A.shape[0] == 0:
+                A = np.append(A, [np.zeros(A.shape[1], dtype=np.int64)], axis=0)
+                b = np.append(b, 0)
+
+            obj_mat = np.zeros((len(objectives), len(self.columns)), dtype=np.int64)
+            for i, obj in enumerate(objectives):
+                obj_mat[i, [self._col(k) for k in obj]] = list(obj.values())
+
+            if solver == Solver.DEFAULT:
+                from pldag.solver.default_solver import solve_lp
+                solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()), minimize=minimize)
+            else:
+                raise ValueError(f"Solver `{solver}` not installed.")
+            
+            return list(
+                map(
+                    lambda solution: dict(
+                        zip(
+                            self.columns, 
+                            map(
+                                lambda i: complex(i,i),
+                                solution
+                            )
+                        )
+                    ),
+                    solutions
+                )
+            )
+        

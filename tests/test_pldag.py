@@ -75,6 +75,29 @@ def test_propagate():
     assert res.get(c) == 0j
     assert res.get(a) == 0j
 
+def test_set_functions():
+    model = PLDAG()
+    model.set_primitives("xyz")
+    a=model.set_atmost("xyz", 1)
+    b=model.set_atmost("xyz", 2)
+    c=model.set_atmost("xyz", 3)
+    res=model.propagate({"x": 1+1j})
+    assert res.get(a) == 1j
+    assert res.get(b) == 1j
+    assert res.get(c) == 1+1j
+    res=model.propagate({"x": 1+1j, "y": 1+1j})
+    assert res.get(a) == 0j
+    assert res.get(b) == 1j
+    assert res.get(c) == 1+1j
+    res=model.propagate({"x": 1+1j, "y": 1+1j, "z": 1+1j})
+    assert res.get(a) == 0j
+    assert res.get(b) == 0j
+    assert res.get(c) == 1+1j
+    res=model.propagate({"x": 0j, "y": 0j, "z": 0j})
+    assert res.get(a) == 1+1j
+    assert res.get(b) == 1+1j
+    assert res.get(c) == 1+1j
+
 
 def test_integer_bounds():
 
