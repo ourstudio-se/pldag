@@ -1,23 +1,23 @@
 [tool.poetry]
 name = "pldag"
-version = "0.9.17"
+version = "0.10.0"
 description = ""
 authors = ["znittzel <rikard@ourstudio.se>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
-numpy = "^1.26.4"
+python = "^3.10"
+numpy = "^2.1.2"
 
 # Optional dependency
-npycvx = { version = "^0.0.2", optional = true }
+npycvx = { version = "^0.0.4", optional = true }
 
 [tool.poetry.extras]
 cvx = ["npycvx"]
 
 [tool.poetry.group.test.dependencies]
-pytest = "^8.0.0"
-hypothesis = "^6.100.1"
+pytest = "^8.3.3"
+hypothesis = "^6.115.3"
 
 [build-system]
 requires = ["poetry-core"]
