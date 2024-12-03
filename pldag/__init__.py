@@ -63,9 +63,9 @@ class PLDAG:
         In summary, this data structure combines elements of a DAG with a logic network, utilizing prime numbers to encode relationships and facilitate operations within the graph.
     """
 
-    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT):
+    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT, dtype: np.dtype = np.int64):
         # Weighted adjacency matrix. Each entry is a coefficient indicating if there is a dependency and how strong it is.
-        self._amat = np.zeros((0, 0),   dtype=np.int64)
+        self._amat = np.zeros((0, 0),   dtype=dtype)
         # Complex vector representing bounds of complex number data type
         self._dvec = np.zeros((0, ),    dtype=complex)
         # Bias vector
@@ -1595,7 +1595,6 @@ class PLDAG:
             solver: Solver, 
             double_bind_constraints: bool = True, 
             minimize: bool = False,
-            reduce: bool = True,
         ) -> List[Dict[str, complex]]:
         """
             Solves the model with the given objectives.
@@ -1667,7 +1666,8 @@ class PLDAG:
                 map(
                     lambda solution: dict(
                         zip(
-                            variables, 
+                            # Convert back to str from np.str_
+                            map(str, variables), 
                             map(
                                 lambda i: complex(i,i),
                                 solution
@@ -1903,6 +1903,8 @@ class PDLite:
             self._bvec = np.append(self._bvec, _b)
             self._tvec = np.append(self._tvec, list(map(lambda x: x[5], composites.values())))
             self._rmap = {**self._rmap, **dict(zip(composites, range(max(self._rmap.values(), default=0), len(composites))))}
+
+        self._buffer = {}
 
     @lru_cache
     def to_polyhedron(self, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
