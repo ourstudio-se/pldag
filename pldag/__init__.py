@@ -1456,7 +1456,10 @@ class PLDAG:
         mx_b = max(abs(b.max()), abs(b.max()))
         mx = mx_A if mx_A > mx_b else mx_b
         dtype = np.int64 if mx > 2**32 else (np.int32 if mx > 2**16 else np.int16)
-        return A.astype(dtype), b.astype(dtype)
+        _A = A.astype(dtype)
+        _b = b.astype(dtype)
+        del A, b
+        return _A, _b
     
     def _from_indices(self, row_idxs: np.ndarray, col_idxs: np.ndarray) -> 'PLDAG':
         """
