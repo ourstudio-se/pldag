@@ -398,7 +398,7 @@ class PLDAG:
         # Then add the new ids
         new_ids = list(filter(lambda x: x not in self._imap, map(lambda x: x[0], primitives)))
         if new_ids:
-            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=np.int64)))
+            self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=self._amat.dtype)))
             self._dvec = np.append(self._dvec, np.array(list(map(lambda x: x[1][2], primitives))))
             self._cvec = np.append(self._cvec, np.array([False] * len(new_ids)))
             self._svec = np.append(self._svec, np.array([False] * len(new_ids)))
