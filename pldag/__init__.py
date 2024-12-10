@@ -1349,7 +1349,7 @@ class PLDAG:
         ib = self._sdot(A, self._dvec)
 
         # Adjacent points
-        adj_points = np.argwhere(self._amat != 0, dtype=np.bool)
+        adj_points = np.argwhere(self._amat != 0)
 
         # If no adjacent points, return empty matrix
         if adj_points.size == 0:
