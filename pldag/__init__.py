@@ -1317,7 +1317,6 @@ class PLDAG:
             self.set_not([lhs, rhs], silent=True),
         ], alias, silent, ttype)
     
-    @lru_cache
     def to_polyhedron(self, double_binding: bool = True, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
 
         """
@@ -1350,11 +1349,13 @@ class PLDAG:
         ib = self._sdot(A, self._dvec)
 
         # Adjacent points
-        adj_points = np.argwhere(self._amat != 0)
+        adj_points = np.argwhere(self._amat != 0, dtype=np.bool)
 
         # If no adjacent points, return empty matrix
         if adj_points.size == 0:
             return np.zeros((0, self._amat.shape[1]), dtype=np.int64), np.zeros(0, dtype=np.int64)
+        
+        del adj_points
 
         # Pi -> Phi row indices
         Pi_Phi_i = np.arange(self._amat.shape[0])
@@ -1451,15 +1452,10 @@ class PLDAG:
         A = np.vstack([A, A_int])
         b = np.append(b, b_int)
 
-        # Change data type depending on max abs value of A and b
-        mx_A = max(abs(A.max()), abs(A.min()))
-        mx_b = max(abs(b.max()), abs(b.max()))
-        mx = mx_A if mx_A > mx_b else mx_b
-        dtype = np.int64 if mx > 2**32 else (np.int32 if mx > 2**16 else np.int16)
-        _A = A.astype(dtype)
-        _b = b.astype(dtype)
-        del A, b
-        return _A, _b
+        # Delete A_int and b_int
+        del A_int, b_int
+
+        return A, b
     
     def _from_indices(self, row_idxs: np.ndarray, col_idxs: np.ndarray) -> 'PLDAG':
         """
@@ -1914,7 +1910,6 @@ class PDLite:
 
         self._buffer = {}
 
-    @lru_cache
     def to_polyhedron(self, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
 
         """
