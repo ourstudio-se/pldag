@@ -280,6 +280,16 @@ def test_to_polyhedron():
     assert A.shape == (0, 4)
     assert b.shape == (0,)
 
+    # Test when only primitives but some are integers
+    model = PLDAG()
+    model.set_primitive("a")
+    model.set_primitive("b", 2j)
+    model.set_primitive("c", 10j)
+
+    A,b = model.to_polyhedron(double_binding=True)
+    assert A.shape == (4, 3)
+    assert b.shape == (4,)
+
 def test_logical_operators():
 
     model = PLDAG()

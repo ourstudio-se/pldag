@@ -1317,6 +1317,34 @@ class PLDAG:
             self.set_not([lhs, rhs], silent=True),
         ], alias, silent, ttype)
     
+    def set_not_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "not_equal") -> str:
+        """
+            Add a composite constraint of a NOT EQUAL operation: sum(references) != value.
+
+            Parameters
+            ----------
+            references : List[str]
+                The references to composite constraints or primitive variables.
+
+            value : int
+                The value to be not equal.
+
+            alias : Optional[str] (default=None)
+                The alias of the constraint.
+
+            silent : bool (default=False)
+                If True, the constraint is considered not be added by the user, but as a consequence of composite construction.
+
+            ttype : str (default="not_equal")
+                The type of the constraint.
+
+            Returns
+            -------
+            str
+                The ID of the composite constraint.
+        """
+        return self.set_not([self.set_equal(references, value, silent=True)], alias, silent, ttype)
+    
     def to_polyhedron(self, double_binding: bool = True, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
 
         """
@@ -1347,15 +1375,6 @@ class PLDAG:
 
         # Calculate inner bounds for each composite
         ib = self._sdot(A, self._dvec)
-
-        # Adjacent points
-        adj_points = np.argwhere(self._amat != 0)
-
-        # If no adjacent points, return empty matrix
-        if adj_points.size == 0:
-            return np.zeros((0, self._amat.shape[1]), dtype=np.int64), np.zeros(0, dtype=np.int64)
-        
-        del adj_points
 
         # Pi -> Phi row indices
         Pi_Phi_i = np.arange(self._amat.shape[0])

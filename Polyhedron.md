@@ -8,8 +8,8 @@ A linear inequality constraint consists of four parts:
 4) A bias. A constant integer, independent on any of the variable's values. 
 
 Here are examples of linear inequality constraints:
-- $x + y + z >= -1$ where $x,y,z \in [0,1]^3$
-- $x + y + z >= -3$ where $x,y,z \in [0,1]^3$
+- $x + y + z >= 1$ where $x,y,z \in [0,1]^3$
+- $x + y + z >= 3$ where $x,y,z \in [0,1]^3$
 - $-2x + y + z \geq 0$ where $x,y,z \in [0,1]^3$
 
 ## The <i>inner bound</i> of a linear inequality constraint

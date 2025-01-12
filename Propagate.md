@@ -1,7 +1,7 @@
 # Propagation algorithm
 
 ## Composites and its evaluation
-First, understand how each composite is represented and why. A composite has links to other variables (composites/primitives) and also a coefficient for each of the links. In the end, a composite is written as `ax + by + cz + d >= 0`, where each `x,y,z` are links to other values and `a,b,c,d` are coefficients. `d` is a constant value, no variable link, and is called the bias. Each value of `x,y,z` are called `bounds`. They are a two value tuple `(lower, upper)` and represents the most (inclusive) lower and most upper value a variable can take. To multiple a bound `x` with a coefficient `a` is pretty straight forward, but needs attention to negative coefficients:
+First, understand how each composite is represented and why. A composite has links to other variables (composites/primitives) and also a coefficient for each of the links. In the end, a composite is written as `ax + by + cz + d >= 0`, where each `x,y,z` are links to other values and `a,b,c,d` are coefficients. `d` is a constant value, no variable link, and is called the bias. Each value of `x,y,z` are called `bounds`. They are a two value tuple `(lower, upper)` and represents the least (inclusive) lower and most upper value a variable can take. To multiply a bound `x` with a coefficient `a` is pretty straight forward, but needs attention to negative coefficients:
 ```
 f = {a,x} => (
     a * x.lower,
