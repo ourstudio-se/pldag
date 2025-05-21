@@ -708,6 +708,7 @@ def test_dump_load():
     assert model == PLDAG.load(model.dump())
 
 def test_unique_ids():
+
     model = PLDAG()
     model.set_primitives("xyz")
 
@@ -767,3 +768,19 @@ def test_unique_ids():
     A2, b2 = model.to_polyhedron()
     assert A.shape != A2.shape
     assert b.shape != b2.shape
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitives("abc")
+    root = model.set_xor([
+        model.set_xor("abc", unique=True, alias="A"),
+        model.set_xor("abc", unique=True, alias="B"),
+        model.set_xor("abc", unique=True, alias="C"),
+    ])
+    model.compile()
+    propagated = model.propagate({"a": 1+1j, "b": 0j, "c": 0j})
+    assert propagated.get(root) == 0j
+
+def test_auto_create_primitives():
+    model = PLDAG()
+    root = model.set_xor("xyz")
+    assert model.propagate({"x": 1+1j, "y": 0j, "z": 0j}).get(root) == 1+1j
