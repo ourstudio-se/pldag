@@ -706,3 +706,64 @@ def test_dump_load():
     model.set_atleast("abcd", -9, alias="B")
     model.set_atmost("abcd", 5, alias="C")
     assert model == PLDAG.load(model.dump())
+
+def test_unique_ids():
+    model = PLDAG()
+    model.set_primitives("xyz")
+
+    # Test for base set operation ge lineq
+    assert model.set_gelineq({"x": 1, "y": 1, "z": 1}, 3, unique=True) != model.set_gelineq({"x": 1, "y": 1, "z": 1}, 3, unique=True)
+    assert model.set_gelineq({"x": 1, "y": 1, "z": 1}, 3) != model.set_gelineq({"x": 1, "y": 1, "z": 1}, 3, unique=True)
+    assert model.set_gelineq({"x": 1, "y": 1, "z": 1}, 3) == model.set_gelineq({"x": 1, "y": 1, "z": 1}, 3)
+
+    # Test for logical set operations
+    for fn_logic in [
+        model.set_and,
+        model.set_or,
+        model.set_not,
+        model.set_xor,
+        model.set_xnor,
+        model.set_nand,
+        model.set_nor,
+    ]:
+        assert fn_logic("xyz", unique=True) != fn_logic("xyz", unique=True)
+        assert fn_logic("xyz") != fn_logic("xyz", unique=True)
+        assert fn_logic("xyz") == fn_logic("xyz")
+
+    # Test for value set operations
+    for fn_value in [
+        model.set_atleast,
+        model.set_atmost,
+        model.set_equal,
+    ]:
+        assert fn_value("xyz", 1, unique=True) != fn_value("xyz", 1, unique=True)
+        assert fn_value("xyz", 1) != fn_value("xyz", 1, unique=True)
+        assert fn_value("xyz", 1) == fn_value("xyz", 1)
+
+    # Test for binary set operations
+    for fn_binary in [
+        model.set_imply,
+        model.set_equiv,
+    ]:
+        a = model.set_and("xy")
+        b = model.set_and("yz")
+        assert fn_binary(a, b, unique=True) != fn_binary(a, b, unique=True)
+        assert fn_binary(a, b) != fn_binary(a, b, unique=True)
+        assert fn_binary(a, b) == fn_binary(a, b)
+
+    # Test that the polyhedron is indeed larger with unique composites
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_and("xyz")
+    A, b = model.to_polyhedron()
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    a1 = model.set_and("xyz", alias="a1", unique=True)
+    a2 = model.set_and("xyz", alias="a2", unique=True)
+    assert model.id_from_alias("a1") == a1
+    assert model.id_from_alias("a2") == a2
+    
+    A2, b2 = model.to_polyhedron()
+    assert A.shape != A2.shape
+    assert b.shape != b2.shape

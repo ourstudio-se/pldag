@@ -199,11 +199,12 @@ class PLDAG:
         ).static_order()
     
     @staticmethod
-    def _composite_id(coefficients: Dict[str,int], bias: int) -> str:
+    def _composite_id(coefficients: Dict[str,int], bias: int, unique: bool = False) -> str:
         """
             Create a composite ID from a list of children.
         """
-        return sha1(("".join(map(lambda x: str(x), sorted(set(coefficients.items())))) + str(bias)).encode()).hexdigest()
+        salt = np.random.bytes(8).hex() if unique else ""
+        return sha1(("".join(map(lambda x: str(x), sorted(set(coefficients.items())))) + str(bias) + salt).encode()).hexdigest()
     
     def _corruption_middleware_runner(self, f, *args, **kwargs):
         try:
@@ -504,7 +505,7 @@ class PLDAG:
         
         return all_ids
 
-    def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "lineq") -> str:
+    def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "lineq", unique: bool = False) -> str:
         """
             Sets a linear inequality constraint, ax + by + cz + bias >= 0.
 
@@ -525,6 +526,9 @@ class PLDAG:
             ttype : str (default="lineq")
                 The type of the constraint.
 
+            unique : bool (default=False)
+                If True, the constraint is considered unique by itself and not based on its children.
+
             Examples
             --------
             >>> model = PLDAG()
@@ -539,7 +543,8 @@ class PLDAG:
         """
         _id = self._composite_id(
             coefficients,
-            bias
+            bias,
+            unique=unique
         )
         self._buffer[_id] = (coefficients, bias, 1j, alias, silent, ttype)
         
@@ -925,7 +930,7 @@ class PLDAG:
                                
         return ids
     
-    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atleast") -> str:
+    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atleast", unique: bool = False) -> str:
         """
             Add a composite constraint of at least `value`.
 
@@ -959,9 +964,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias, silent, ttype)
+        return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias, silent, ttype, unique)
     
-    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atmost") -> str:
+    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atmost", unique: bool = False) -> str:
         """
             Add a composite constraint of at most `value`.
 
@@ -995,9 +1000,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias, silent=silent, ttype=ttype)
+        return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias, silent=silent, ttype=ttype, unique=unique)
     
-    def set_or(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "or") -> str:
+    def set_or(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "or", unique: bool = False) -> str:
         """
             Add a composite constraint of an OR operation.
 
@@ -1028,9 +1033,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(references, 1, alias, silent, ttype)
+        return self.set_atleast(references, 1, alias, silent, ttype, unique=unique)
     
-    def set_nor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nor") -> str:
+    def set_nor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nor", unique: bool = False) -> str:
         """
             Add a composite constraint of an N(ot)OR operation.
 
@@ -1053,9 +1058,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_not([self.set_or(references, silent=True)], alias, silent, ttype)
+        return self.set_not([self.set_or(references, silent=True)], alias, silent, ttype, unique=unique)
     
-    def set_and(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "and") -> str:
+    def set_and(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "and", unique: bool = False) -> str:
         """
             Add a composite constraint of an AND operation.
 
@@ -1086,9 +1091,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atleast(set(references), len(set(references)), alias, silent, ttype)
+        return self.set_atleast(set(references), len(set(references)), alias, silent, ttype, unique=unique)
     
-    def set_nand(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nand") -> str:
+    def set_nand(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nand", unique: bool = False) -> str:
         """
             Add a composite constraint of an N(ot)AND operation.
 
@@ -1111,9 +1116,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_not([self.set_and(references, silent=True)], alias, silent, ttype)
+        return self.set_not([self.set_and(references, silent=True)], alias, silent, ttype, unique=unique)
     
-    def set_not(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "not") -> str:
+    def set_not(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "not", unique: bool = False) -> str:
         """
             Add a composite constraint of a NOT operation.
 
@@ -1144,9 +1149,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_atmost(references, 0, alias, silent, ttype)
+        return self.set_atmost(references, 0, alias, silent, ttype, unique=unique)
     
-    def set_xor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "xor") -> str:
+    def set_xor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "xor", unique: bool = False) -> str:
         """
             Add a composite constraint of an XOR operation.
 
@@ -1177,9 +1182,9 @@ class PLDAG:
         return self.set_and([
             self.set_atleast(references, 1, silent=True),
             self.set_atmost(references, 1, silent=True),
-        ], alias, silent, ttype)
+        ], alias, silent, ttype, unique=unique)
     
-    def set_xnor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "xnor") -> str:
+    def set_xnor(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "xnor", unique: bool = False) -> str:
         """
             Add a composite constraint of an XNOR operation.
 
@@ -1210,9 +1215,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_not([self.set_xor(references, silent=True)], alias, silent, ttype)
+        return self.set_not([self.set_xor(references, silent=True)], alias, silent, ttype, unique=unique)
     
-    def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None, silent: bool = False, ttype: str = "imply") -> str:
+    def set_imply(self, condition: str, consequence: str, alias: Optional[str] = None, silent: bool = False, ttype: str = "imply", unique: bool = False) -> str:
         """
             Add a composite constraint of an IMPLY operation.
 
@@ -1252,9 +1257,9 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_or([self.set_not([condition], silent=True), consequence], alias, silent, ttype)
+        return self.set_or([self.set_not([condition], silent=True), consequence], alias, silent, ttype, unique=unique)
 
-    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "equal") -> str:
+    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "equal", unique: bool = False) -> str:
         """
             Add a composite constraint of an EQUAL operation: sum(references) == value.
 
@@ -1283,9 +1288,9 @@ class PLDAG:
         return self.set_and([
             self.set_atleast(references, value, silent=True),
             self.set_atmost(references, value, silent=True),
-        ], alias, silent, ttype)
+        ], alias, silent, ttype, unique=unique)
     
-    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None, silent: bool = False, ttype: str = "equiv") -> str:
+    def set_equiv(self, lhs: str, rhs: str, alias: Optional[str] = None, silent: bool = False, ttype: str = "equiv", unique: bool = False) -> str:
         """
             Add a composite constraint of an EQUIVALENCE operation, lhs <-> rhs.
             It is equivalent to set_and([set_imply(lhs, rhs), set_imply(rhs, lhs)]).
@@ -1315,9 +1320,9 @@ class PLDAG:
         return self.set_or([
             self.set_and([lhs, rhs], silent=True),
             self.set_not([lhs, rhs], silent=True),
-        ], alias, silent, ttype)
+        ], alias, silent, ttype, unique=unique)
     
-    def set_not_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "not_equal") -> str:
+    def set_not_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "not_equal", unique: bool = False) -> str:
         """
             Add a composite constraint of a NOT EQUAL operation: sum(references) != value.
 
@@ -1343,7 +1348,7 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_not([self.set_equal(references, value, silent=True)], alias, silent, ttype)
+        return self.set_not([self.set_equal(references, value, silent=True)], alias, silent, ttype, unique=unique)
     
     def to_polyhedron(self, double_binding: bool = True, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
 
