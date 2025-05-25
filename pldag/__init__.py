@@ -3,7 +3,7 @@ import numpy as np
 from enum import Enum
 from hashlib import sha1
 from itertools import groupby, starmap, chain, count
-from functools import partial, lru_cache
+from functools import partial
 from typing import Dict, List, Set, Optional, Tuple
 from graphlib import TopologicalSorter
 from pickle import dumps, loads, HIGHEST_PROTOCOL
@@ -85,7 +85,7 @@ class PLDAG:
         # If not a primitive exists before referenced, it will be created as a boolean variable
         self.auto_create_primitives = auto_create_primitives
         # Buffer for constraints
-        self._buffer = {}
+        self._buffer = []
 
     def __hash__(self) -> int:
         return hash(self.sha1())
@@ -387,8 +387,8 @@ class PLDAG:
         all_ids = []
         primitives = list(
             filter(
-                lambda x: len(x[1][0]) == 0,
-                self._buffer.items()
+                lambda x: len(x[1]) == 0,
+                self._buffer
             )
         )
 
@@ -396,27 +396,26 @@ class PLDAG:
         # Set first the existing ids
         existing_ids = list(filter(lambda x: x in self._imap, map(lambda x: x[0], primitives)))
         if existing_ids:
-            self._dvec[[self._col(x) for x in existing_ids]] = list(map(lambda x: x[1][2], primitives))
+            self._dvec[[self._col(x) for x in existing_ids]] = list(map(lambda x: x[3], primitives))
 
         # Then add the new ids
         new_ids = list(filter(lambda x: x not in self._imap, map(lambda x: x[0], primitives)))
         if new_ids:
             self._amat = np.hstack((self._amat, np.zeros((self._amat.shape[0], len(new_ids)), dtype=self._amat.dtype)))
-            self._dvec = np.append(self._dvec, np.array(list(map(lambda x: x[1][2], primitives))))
+            self._dvec = np.append(self._dvec, np.array(list(map(lambda x: x[3], primitives))))
             self._cvec = np.append(self._cvec, np.array([False] * len(new_ids)))
             self._svec = np.append(self._svec, np.array([False] * len(new_ids)))
             self._tvec = np.append(self._tvec, np.array(["primitive"] * len(new_ids)))
             self._imap.update(dict(zip(new_ids, range(self._amat.shape[1] - len(new_ids), self._amat.shape[1]))))
 
-        new_composites = list(
-            starmap(
-                lambda k,v: (k, ) + v,
-                filter(
-                    lambda x: (x[0] not in self._imap) and len(x[1][0]) > 0, 
-                    self._buffer.items(),
-                )
-            )
-        )
+        seen = set()
+        new_composites = []
+        for item in self._buffer:
+            id_ = item[0]
+            if id_ not in seen and id_ not in self._imap and len(item[1]) > 0:
+                seen.add(id_)
+                new_composites.append(item)
+
         if new_composites:
 
             # Copy the model to be able to revert if compilation fails
@@ -490,7 +489,7 @@ class PLDAG:
         # Update the amap with the ALL composites
         # There may be existing ones which only wants to add new aliases
         if self._buffer:
-            all_ids, _, _, _, aliases, _, _ = zip(*starmap(lambda k,v: (k,) + v, self._buffer.items()))
+            all_ids, _, _, _, aliases, _, _ = zip(*self._buffer)
             self._amap.update(
                 dict(
                     filter(
@@ -504,7 +503,7 @@ class PLDAG:
             )
             
         # Clear the buffer
-        self._buffer = {}
+        self._buffer = []
         
         return all_ids
 
@@ -546,7 +545,7 @@ class PLDAG:
         """
         if self.auto_create_primitives:
             for k in coefficients.keys():
-                if not (k in self._imap or k in self._buffer):
+                if not (k in self._imap or k in map(lambda x: x[0], self._buffer)):
                     self.set_primitive(k, complex(0, 1))
 
         _id = self._composite_id(
@@ -554,7 +553,7 @@ class PLDAG:
             bias,
             unique=unique
         )
-        self._buffer[_id] = (coefficients, bias, 1j, alias, silent, ttype)
+        self._buffer.append((_id, coefficients, bias, 1j, alias, silent, ttype))
         
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
@@ -900,7 +899,7 @@ class PLDAG:
                 The ID of the primitive variable.
         """
 
-        self._buffer[id] = ({}, None, bound, None, False, "primitive")
+        self._buffer.append((id, {}, None, bound, None, False, "primitive"))
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
 
@@ -1847,7 +1846,7 @@ class PDLite:
         # Keeps track of variable type. Size is equal to the number of rows in A.
         self._tvec = np.empty((0, ),    dtype=object)
         # Buffer for new variables/constraints
-        self._buffer = {}
+        self._buffer = []
         # Index map for rows
         self._rmap = {}
         # Index map for columns
@@ -1868,7 +1867,7 @@ class PDLite:
         return self._rmap[k]
 
     def set_primitive(self, id: str, bound: complex = complex(0,1)) -> List[str]:
-        self._buffer[id] = ({}, None, bound, None, False, "primitive")
+        self._buffer.append((id, {}, None, bound, None, False, "primitive"))
         return id
 
     def set_primitives(self, ids: str, bound: complex = complex(0,1)) -> list:
@@ -1879,7 +1878,7 @@ class PDLite:
     def set_gelineq(self, references: Dict[str, int], value: int, alias: Optional[str] = None, ttype: str = "gelineq") -> List[str]:
         data = (references, alias, value, None, False, ttype)
         id = sha1(dumps(data)).hexdigest()
-        self._buffer[id] = data
+        self._buffer.append((id,) + data)
         return [id]
 
     def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, ttype: str = "atleast", and_condition: List[str] = []) -> List[str]:
@@ -1918,14 +1917,14 @@ class PDLite:
     def compile(self):
         
         # Set primitives first
-        primitives = dict(filter(lambda x: len(x[1][0]) == 0, self._buffer.items()))
+        primitives = dict(filter(lambda x: len(x[1]) == 0, self._buffer))
         if primitives:
             self._amat = np.pad(self._amat, ((0, 0), (0, len(primitives))), mode='constant', constant_values=0)
             self._dvec = np.append(self._dvec, list(map(lambda x: x[2], primitives.values())))
             self._imap = {**self._imap, **dict(zip(primitives, range(max(self._imap.values(), default=0), len(primitives))))}
 
         # Set composites
-        composites = dict(filter(lambda x: len(x[1][0]) > 0, self._buffer.items()))
+        composites = dict(filter(lambda x: len(x[1]) > 0, self._buffer))
         if composites:
             _A = np.zeros((len(composites), self._amat.shape[1]))
             _b = np.zeros(len(composites))
@@ -1940,7 +1939,7 @@ class PDLite:
             self._tvec = np.append(self._tvec, list(map(lambda x: x[5], composites.values())))
             self._rmap = {**self._rmap, **dict(zip(composites, range(max(self._rmap.values(), default=0), len(composites))))}
 
-        self._buffer = {}
+        self._buffer = []
 
     def to_polyhedron(self, **assume: Dict[str, complex]) -> Tuple[np.ndarray, np.ndarray]:
 

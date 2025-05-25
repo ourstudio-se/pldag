@@ -233,11 +233,19 @@ def test_multiple_pointers():
     assert (dependencies[0] == a) and (dependencies[0] == b)
 
 def test_multiple_alias():
-    model = PLDAG()
+    model = PLDAG(compilation_setting=CompilationSetting.INSTANT)
     model.set_primitives("xyz")
     model.set_and("xyz", alias="A")
     model.set_and("xyz", alias="B")
     model.set_and("xyz", alias="C")
+    assert model.id_from_alias("A") == model.id_from_alias("B") == model.id_from_alias("C")
+    
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitives("xyz")
+    model.set_and("xyz", alias="A")
+    model.set_and("xyz", alias="B")
+    model.set_and("xyz", alias="C")
+    model.compile()
     assert model.id_from_alias("A") == model.id_from_alias("B") == model.id_from_alias("C")
 
 def test_to_polyhedron():
