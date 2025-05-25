@@ -45,6 +45,7 @@ First note that $\phi \rightarrow \pi$ is equivilant to $\neg \phi \lor \pi$.
 1. Calculate $\phi' = \neg \phi$
 2. Let $d = \text{max}(|\text{ib}(\phi')|)$ 
 3. Append $(d - \text{bias}(\phi'))\pi$ to left side of $\phi'$. 
+4. Keep bias of $\phi'$ as is
 
 For example, let $\phi = -a -b -c -d +5 \geq 0$ where $a \in [-5,3]$, $b \in [0,2]$, $c \in [-4,4]$ and $d \in [-4,5]$ and create a new inequality $\theta$ from $\phi \rightarrow \pi$. 
 1. We start by negating $\phi$: $\neg \phi = a + b + c + d -6 \geq 0$

@@ -232,6 +232,14 @@ def test_multiple_pointers():
     assert len(dependencies) == 1
     assert (dependencies[0] == a) and (dependencies[0] == b)
 
+def test_multiple_alias():
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_and("xyz", alias="A")
+    model.set_and("xyz", alias="B")
+    model.set_and("xyz", alias="C")
+    assert model.id_from_alias("A") == model.id_from_alias("B") == model.id_from_alias("C")
+
 def test_to_polyhedron():
 
     model = PLDAG()
@@ -781,6 +789,6 @@ def test_unique_ids():
     assert propagated.get(root) == 0j
 
 def test_auto_create_primitives():
-    model = PLDAG()
+    model = PLDAG(auto_create_primitives=True)
     root = model.set_xor("xyz")
     assert model.propagate({"x": 1+1j, "y": 0j, "z": 0j}).get(root) == 1+1j

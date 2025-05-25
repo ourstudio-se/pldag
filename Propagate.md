@@ -33,7 +33,7 @@ function propagate(interpretation: ID to Bound):
     
     S = All composites that 
         (1) have only primitive variables as input and
-        (2) are not being in `result/interpretation`
+        (2) are not present in `result/interpretation`
 
     # Now, just as in Kahn's algorithm, we loop until S is empty
     while S is not empty:

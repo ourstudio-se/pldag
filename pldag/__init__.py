@@ -63,7 +63,7 @@ class PLDAG:
         In summary, this data structure combines elements of a DAG with a logic network, utilizing prime numbers to encode relationships and facilitate operations within the graph.
     """
 
-    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT, dtype: np.dtype = np.int64, auto_create_primitives: bool = True):
+    def __init__(self, compilation_setting: CompilationSetting = CompilationSetting.INSTANT, dtype: np.dtype = np.int64, auto_create_primitives: bool = False):
         # Weighted adjacency matrix. Each entry is a coefficient indicating if there is a dependency and how strong it is.
         self._amat = np.zeros((0, 0),   dtype=dtype)
         # Complex vector representing bounds of complex number data type
@@ -480,27 +480,28 @@ class PLDAG:
                 # Set equal many types as new composites
                 self._tvec = np.append(self._tvec, np.array(types))
 
-                # Update the amap with the ALL composites
-                # There may be existing ones which only wants to add new aliases
-                all_ids, _, _, _, aliases, _, _ = zip(*starmap(lambda k,v: (k,) + v, self._buffer.items()))
-                self._amap.update(
-                    dict(
-                        filter(
-                            lambda x: x[0] is not None,
-                            zip(
-                                aliases,
-                                all_ids,
-                            )
-                        )
-                    )
-                )
-
             except MissingVariableException as e:
                 self.revert_from(copy_of_self)
                 raise e
             except Exception as e:
                 self.revert_from(copy_of_self)
                 raise FailedToCompileException(e)
+            
+        # Update the amap with the ALL composites
+        # There may be existing ones which only wants to add new aliases
+        if self._buffer:
+            all_ids, _, _, _, aliases, _, _ = zip(*starmap(lambda k,v: (k,) + v, self._buffer.items()))
+            self._amap.update(
+                dict(
+                    filter(
+                        lambda x: x[0] is not None,
+                        zip(
+                            aliases,
+                            all_ids,
+                        )
+                    )
+                )
+            )
             
         # Clear the buffer
         self._buffer = {}
@@ -545,7 +546,7 @@ class PLDAG:
         """
         if self.auto_create_primitives:
             for k in coefficients.keys():
-                if k not in self._imap or k not in self._buffer:
+                if not (k in self._imap or k in self._buffer):
                     self.set_primitive(k, complex(0, 1))
 
         _id = self._composite_id(
