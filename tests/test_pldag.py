@@ -608,6 +608,38 @@ def test_revert_if_compilation_fails():
     except MissingVariableException:
         assert model == copy_of_model
 
+def test_copy():
+
+    model = PLDAG()
+    model.set_primitives("xyz")
+    model.set_xor([
+        model.set_and("xyz", alias="A"),
+        model.set_or("xyz", alias="B")
+    ], alias="C")
+    copy_of_model = model.copy()
+    
+    assert model == copy_of_model
+    assert model._imap == copy_of_model._imap
+    assert (model._bvec == copy_of_model._bvec).all()
+    assert (model._row_vars == copy_of_model._row_vars).all()
+    assert model._amap == copy_of_model._amap
+
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitives("xyz")
+    model.set_xor([
+        model.set_and("xyz", alias="A"),
+        model.set_or("xyz", alias="B")
+    ], alias="C")
+    copy_of_model = model.copy()
+    
+    assert model == copy_of_model
+    assert model._imap == copy_of_model._imap
+    assert (model._bvec == copy_of_model._bvec).all()
+    assert (model._row_vars == copy_of_model._row_vars).all()
+    assert model._amap == copy_of_model._amap
+    assert model._buffer == copy_of_model._buffer
+    assert model._compilation_setting == copy_of_model._compilation_setting
+
 def test_solve_missing_variable_should_fail():
 
     model = PLDAG()

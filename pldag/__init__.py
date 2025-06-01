@@ -776,6 +776,9 @@ class PLDAG:
         model._tvec = self._tvec.copy()
         model._imap = self._imap.copy()
         model._amap = self._amap.copy()
+        model._compilation_setting = self._compilation_setting
+        model.auto_create_primitives = self.auto_create_primitives
+        model._buffer = self._buffer.copy()
         return model
     
     def get(self, *id: str) -> np.ndarray:
