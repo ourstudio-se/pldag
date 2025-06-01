@@ -832,3 +832,12 @@ def test_auto_create_primitives():
     model = PLDAG(auto_create_primitives=True)
     root = model.set_xor("xyz")
     assert model.propagate({"x": 1+1j, "y": 0j, "z": 0j}).get(root) == 1+1j
+
+def test_when_composites_turns_to_primitives():
+    model = PLDAG()
+    model.set_atleast([], 0, alias="A")
+    model.set_atleast([], 1, alias="B")
+    model.set_atleast([], 2, alias="C")
+    A, b = model.to_polyhedron(double_binding=True)
+    assert A.shape == (0, 3)
+    assert b.shape == (0,)

@@ -8,6 +8,7 @@ from typing import Dict, List, Set, Optional, Tuple
 from graphlib import TopologicalSorter
 from pickle import dumps, loads, HIGHEST_PROTOCOL
 from gzip import compress, decompress
+from more_itertools import unique
 
 class NoSolutionsException(Exception):
     pass
@@ -386,9 +387,15 @@ class PLDAG:
         """
         all_ids = []
         primitives = list(
-            filter(
-                lambda x: len(x[1]) == 0,
-                self._buffer
+            unique(
+                sorted(
+                    filter(
+                        lambda x: len(x[1]) == 0,
+                        self._buffer
+                    ),
+                    key=lambda x: x[0]
+                ),
+                key=lambda x: x[0]
             )
         )
 
@@ -408,13 +415,18 @@ class PLDAG:
             self._tvec = np.append(self._tvec, np.array(["primitive"] * len(new_ids)))
             self._imap.update(dict(zip(new_ids, range(self._amat.shape[1] - len(new_ids), self._amat.shape[1]))))
 
-        seen = set()
-        new_composites = []
-        for item in self._buffer:
-            id_ = item[0]
-            if id_ not in seen and id_ not in self._imap and len(item[1]) > 0:
-                seen.add(id_)
-                new_composites.append(item)
+        new_composites = list(
+            unique(
+                sorted(
+                    filter(
+                        lambda x: (len(x[1]) > 0) and (x[0] not in self._imap),
+                        self._buffer
+                    ),
+                    key=lambda x: x[0]
+                ),
+                key=lambda x: x[0]
+            )
+        )
 
         if new_composites:
 

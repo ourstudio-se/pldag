@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pldag"
-version = "0.10.12"
+version = "0.10.13"
 description = ""
 authors = ["znittzel <rikard@ourstudio.se>"]
 readme = "README.md"
@@ -11,6 +11,7 @@ numpy = "^2.1.2"
 
 # Optional dependency
 npycvx = { version = "^0.0.4", optional = true }
+more-itertools = "^10.7.0"
 
 [tool.poetry.extras]
 cvx = ["npycvx"]
