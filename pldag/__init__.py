@@ -4,7 +4,7 @@ from enum import Enum
 from hashlib import sha1
 from itertools import groupby, starmap, chain, count
 from functools import partial
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Dict, List, Set, Optional, Tuple, Union
 from graphlib import TopologicalSorter
 from pickle import dumps, loads, HIGHEST_PROTOCOL
 from gzip import compress, decompress
@@ -952,7 +952,7 @@ class PLDAG:
                                
         return ids
     
-    def set_atleast(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atleast", unique: bool = False) -> str:
+    def set_atleast(self, references: List[str], value: Union[int, str], alias: Optional[str] = None, silent: bool = False, ttype: str = "atleast", unique: bool = False) -> str:
         """
             Add a composite constraint of at least `value`.
 
@@ -961,7 +961,7 @@ class PLDAG:
             references : List[str]
                 The references to composite constraints or primitive variables.
 
-            value : int
+            value : int | str
                 The minimum value to set.
 
             alias : Optional[str] (default=None)
@@ -986,9 +986,27 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias, silent, ttype, unique)
+        if isinstance(value, int):
+            return self.set_gelineq(dict(map(lambda r: (r, 1), references)), -1 * value, alias, silent, ttype, unique)
+        elif isinstance(value, str):
+            return self.set_gelineq(
+                dict(
+                    starmap(
+                        lambda r,v: (r, v), 
+                        chain(
+                            map(lambda x: (x, 1), references),
+                            [(value, -1)]
+                        )
+                    )
+                ), 
+                0, 
+                alias, 
+                silent, 
+                ttype, 
+                unique
+            )
     
-    def set_atmost(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "atmost", unique: bool = False) -> str:
+    def set_atmost(self, references: List[str], value: Union[int, str], alias: Optional[str] = None, silent: bool = False, ttype: str = "atmost", unique: bool = False) -> str:
         """
             Add a composite constraint of at most `value`.
 
@@ -997,7 +1015,7 @@ class PLDAG:
             references : List[str]
                 The references to composite constraints or primitive variables.
 
-            value : int
+            value : int | str
                 The maximum value to set.
 
             alias : Optional[str] (default=None)
@@ -1022,7 +1040,25 @@ class PLDAG:
             str
                 The ID of the composite constraint.
         """
-        return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias, silent=silent, ttype=ttype, unique=unique)
+        if isinstance(value, int):
+            return self.set_gelineq(dict(map(lambda r: (r, -1), references)), value, alias, silent=silent, ttype=ttype, unique=unique)
+        elif isinstance(value, str):
+            return self.set_gelineq(
+                dict(
+                    starmap(
+                        lambda r,v: (r, v), 
+                        chain(
+                            map(lambda x: (x, -1), references),
+                            [(value, 1)]
+                        )
+                    )
+                ), 
+                0, 
+                alias, 
+                silent, 
+                ttype, 
+                unique
+            )
     
     def set_or(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "or", unique: bool = False) -> str:
         """
@@ -1281,7 +1317,7 @@ class PLDAG:
         """
         return self.set_or([self.set_not([condition], silent=True), consequence], alias, silent, ttype, unique=unique)
 
-    def set_equal(self, references: List[str], value: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "equal", unique: bool = False) -> str:
+    def set_equal(self, references: List[str], value: Union[int, str], alias: Optional[str] = None, silent: bool = False, ttype: str = "equal", unique: bool = False) -> str:
         """
             Add a composite constraint of an EQUAL operation: sum(references) == value.
 
@@ -1290,7 +1326,7 @@ class PLDAG:
             references : List[str]
                 The references to composite constraints or primitive variables.
 
-            value : int
+            value : int | str
                 The value to be equal.
 
             alias : Optional[str] (default=None)

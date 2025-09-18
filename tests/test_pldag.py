@@ -841,3 +841,49 @@ def test_when_composites_turns_to_primitives():
     A, b = model.to_polyhedron(double_binding=True)
     assert A.shape == (0, 3)
     assert b.shape == (0,)
+
+def test_when_value_is_string_for_atleast_atmost_equal():
+    model = PLDAG()
+    model.set_primitives("xy")
+    model.set_primitive("z", 2j)
+    root = model.set_atleast("xy", "z")
+    res = model.propagate({"x": 1+1j, "y": 0j, "z": 2j})
+    assert res.get("x") == 1+1j
+    assert res.get("y") == 0j
+    assert res.get("z") == 2j
+    assert res.get(root) == 1j
+    res = model.propagate({"x": 1+1j, "y": 1+1j, "z": 2+2j})
+    assert res.get("x") == 1+1j
+    assert res.get("y") == 1+1j
+    assert res.get("z") == 2+2j
+    assert res.get(root) == 1+1j
+
+    model = PLDAG()
+    model.set_primitives("xy")
+    model.set_primitive("z", 1j)
+    root = model.set_atmost("xy", "z")
+    res = model.propagate({"x": 1+1j, "y": 0j, "z": 1j})
+    assert res.get("x") == 1+1j
+    assert res.get("y") == 0j
+    assert res.get("z") == 1j
+    assert res.get(root) == 1j
+    res = model.propagate({"x": 1+1j, "y": 1+1j, "z": 1+1j})
+    assert res.get(root) == 0j
+    res = model.propagate({"x": 1+1j, "y": 0j, "z": 1+1j})
+    assert res.get(root) == 1+1j
+
+    model = PLDAG()
+    model.set_primitives("xy")
+    model.set_primitive("z", 1j)
+    root = model.set_equal("xy", "z")
+    res = model.propagate({"x": 1+1j, "y": 0j, "z": 1j})
+    assert res.get("x") == 1+1j
+    assert res.get("y") == 0j
+    assert res.get("z") == 1j
+    assert res.get(root) == 1j
+    res = model.propagate({"x": 1+1j, "y": 1+1j, "z": 1+1j})
+    assert res.get(root) == 0j
+    res = model.propagate({"x": 0j, "y": 0j, "z": 0j})
+    assert res.get(root) == 1+1j
+    res = model.propagate({"x": 1+1j, "y": 0j, "z": 1+1j})
+    assert res.get(root) == 1+1j
