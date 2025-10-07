@@ -8,7 +8,7 @@ from typing import Dict, List, Set, Optional, Tuple, Union
 from graphlib import TopologicalSorter
 from pickle import dumps, loads, HIGHEST_PROTOCOL
 from gzip import compress, decompress
-from more_itertools import unique
+from more_itertools import unique, last
 
 class NoSolutionsException(Exception):
     pass
@@ -390,7 +390,7 @@ class PLDAG:
             unique(
                 sorted(
                     filter(
-                        lambda x: len(x[1]) == 0,
+                        lambda x: x[6] == "primitive",
                         self._buffer
                     ),
                     key=lambda x: x[0]
@@ -419,7 +419,7 @@ class PLDAG:
             unique(
                 sorted(
                     filter(
-                        lambda x: (len(x[1]) > 0) and (x[0] not in self._imap),
+                        lambda x: (x[6] != "primitive") and (x[0] not in self._imap),
                         self._buffer
                     ),
                     key=lambda x: x[0]
@@ -560,12 +560,25 @@ class PLDAG:
                 if not (k in self._imap or k in map(lambda x: x[0], self._buffer)):
                     self.set_primitive(k, complex(0, 1))
 
+        # If the composite is either a contradiction or tautology, we create a primitive instead
+        # and fix it to 0 or 1 respectively.
+        dvals_comp = np.array(list(map(lambda x: self.get(x), coefficients.keys())) + [1+1j])
+        coefs_comp = np.array([list(coefficients.values()) + [bias]])
+        result = self._sdot(coefs_comp, dvals_comp)[0]
         _id = self._composite_id(
             coefficients,
             bias,
             unique=unique
         )
-        self._buffer.append((_id, coefficients, bias, 1j, alias, silent, ttype))
+        # If the result is always true, we create a primitive fixed to 1
+        if result.real >= 0:
+            self._buffer.append((_id, {}, 0, 1+1j, alias, silent, "primitive"))
+        
+        # If the result is always false, we create a primitive fixed to 0
+        elif result.imag < 0:
+            self._buffer.append((_id, {}, 0, 0j, alias, silent, "primitive"))
+        else:
+            self._buffer.append((_id, coefficients, bias, 1j, alias, silent, ttype))
         
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
@@ -793,9 +806,21 @@ class PLDAG:
         model._buffer = self._buffer.copy()
         return model
     
-    def get(self, *id: str) -> np.ndarray:
-        """Get the bounds of the given ID(s)"""
-        return self._dvec[list(map(self._col, id))]
+    def get(self, id: str) -> np.ndarray:
+        """Get the bound of the given ID"""
+        # Get from buffer if not compiled yet
+        if self._buffer:
+            bound = last(
+                filter(
+                    lambda y: y[0] == id,
+                    self._buffer
+                ),
+                None
+            )
+            if bound:
+                return bound[3]
+
+        return self._dvec[self._col(id)]
     
     def exists(self, id: str) -> bool:
         """Check if the given id exists"""
@@ -1150,7 +1175,7 @@ class PLDAG:
                 The ID of the composite constraint.
         """
         return self.set_atleast(set(references), len(set(references)), alias, silent, ttype, unique=unique)
-    
+
     def set_nand(self, references: List[str], alias: Optional[str] = None, silent: bool = False, ttype: str = "nand", unique: bool = False) -> str:
         """
             Add a composite constraint of an N(ot)AND operation.
@@ -1481,7 +1506,13 @@ class PLDAG:
                     lambda x: (x[0], int(x[1].real)), 
                     filter(
                         lambda x: x[1].real == x[1].imag, 
-                        assume.items()
+                        {
+                            **{
+                                str(self._icol(i)): complex(self._dvec[i].real, self._dvec[i].real) 
+                                for i in np.argwhere(self._dvec.real == self._dvec.imag).T[0]
+                            }, 
+                            **assume
+                        }.items()
                     )
                 ),
                 key=lambda x: x[1] 
@@ -1499,7 +1530,9 @@ class PLDAG:
                 b = np.append(b, a.sum() * i)
 
         # Set bounds for integer variables
-        int_vars = list(set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()))
+        int_vars = list(set(np.argwhere(
+            ((self._dvec.real != 0) | (self._dvec.imag != 1)) & (self._dvec.real != self._dvec.imag)
+        ).T[0].tolist()))
 
         # Declare new constraints for upper and lower bound for integer variables
         A_int = np.zeros((len(int_vars) * 2, A.shape[1]), dtype=np.int64)
@@ -1744,7 +1777,7 @@ class PLDAG:
 
             if solver == Solver.DEFAULT:
                 from pldag.solver.default_solver import solve_lp
-                solutions = solve_lp(A, b, obj_mat, set(np.argwhere((self._dvec.real != 0) | (self._dvec.imag != 1)).T[0].tolist()), minimize=minimize)
+                solutions = solve_lp(A, b, obj_mat, set(np.argwhere(((self._dvec.real != 0) | (self._dvec.imag != 1)) & (self._dvec.real != self._dvec.imag)).T[0].tolist()), minimize=minimize)
             else:
                 raise ValueError(f"Solver `{solver}` not installed.")
             

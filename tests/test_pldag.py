@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from pldag import *
 from hypothesis import given, strategies
 
@@ -126,7 +127,7 @@ def test_get():
     model = PLDAG()
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", -1)
-    for id, expected in zip(["x", "y", "z", a], np.array([[1j], [1j], [1j], [1j]])):
+    for id, expected in zip(["x", "y", "z", a], np.array([1j, 1j, 1j, 1+1j])):
         assert np.array_equal(model.get(id), expected)
 
 def test_propagate_query():
@@ -201,7 +202,7 @@ def test_dependencies():
 def test_cycle_detection():
     model = PLDAG() 
     model.set_primitives("xyz")
-    model.set_atleast("xyz", -1)
+    model.set_atleast("xyz", 1)
     # There is no way using the set functions to create a cycle
     # So we need to modify the prime table
     # Here we set that "x" as "A" as input
@@ -210,12 +211,12 @@ def test_cycle_detection():
     # It means that we have run A to times
     # Since x is a primitive boolean variable it should have 0-1 as init
     # bountds
-    model.get("x")[0] == 1j
+    model.get("x") == 1j
     model.propagate()
     # However, since we connected A to x, x is considered by the model
     # as a composite and will therefore eventually be evaluated as x = A >= 0
     # which is 1-1
-    model.get("x")[0] == 1+1j
+    model.get("x") == 1+1j
 
 def test_multiple_pointers():
 
@@ -224,10 +225,10 @@ def test_multiple_pointers():
     a=model.set_atleast("xyz", 1)
     b=model.set_atleast("xyz", 1)
     res=model.propagate()
-    assert np.array_equal(model.get(a), np.array([1j]))
-    assert np.array_equal(model.get(b), np.array([1j]))
+    assert model.get(a) == 1j
+    assert model.get(b) == 1j
 
-    c=model.set_atleast([a, b], -1)
+    c=model.set_atleast([a, b], 1)
     dependencies = list(model.dependencies(c))
     assert len(dependencies) == 1
     assert (dependencies[0] == a) and (dependencies[0] == b)
@@ -286,15 +287,17 @@ def test_to_polyhedron():
     model = PLDAG()
     model.set_atleast([], 1)
     A,b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (0, 1)
-    assert b.shape == (0,)
+    assert A.shape == (2, 1)
+    assert b.shape == (2,)
+    assert (A == np.array([[-1], [1]])).all()
+    assert (b == np.array([0, 0])).all()
     
     model = PLDAG()
     model.set_primitives("abc")
     model.set_atleast([], 1)
     A,b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (0, 4)
-    assert b.shape == (0,)
+    assert A.shape == (2, 4)
+    assert b.shape == (2,)
 
     # Test when only primitives but some are integers
     model = PLDAG()
@@ -839,8 +842,8 @@ def test_when_composites_turns_to_primitives():
     model.set_atleast([], 1, alias="B")
     model.set_atleast([], 2, alias="C")
     A, b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (0, 3)
-    assert b.shape == (0,)
+    assert A.shape == (4, 3)
+    assert b.shape == (4,)
 
 def test_when_value_is_string_for_atleast_atmost_equal():
     model = PLDAG()
@@ -887,3 +890,27 @@ def test_when_value_is_string_for_atleast_atmost_equal():
     assert res.get(root) == 1+1j
     res = model.propagate({"x": 1+1j, "y": 0j, "z": 1+1j})
     assert res.get(root) == 1+1j
+
+@pytest.mark.skip(reason="We don't support set_and using integer primitives since it's not well defined")
+def test_set_and_with_integer_primitives():
+    # We don't support set_and using integer primitives since it's not well defined
+    # TODO: Should we?
+    return True
+    model = PLDAG()
+    model.set_primitive("x", 1j)
+    model.set_primitive("y", 2j)
+    c = model.set_and("xy")
+    assert model.propagate({"y": 0j, "x": 1+1j}).get(c) == 0j
+    assert model.propagate({"y": 1+1j, "x": 0j}).get(c) == 0j
+    assert model.propagate({"y": 1+1j, "x": 1+1j}).get(c) == 0j
+    assert model.propagate({"y": 2+2j, "x": 1+1j}).get(c) == 1+1j
+    
+    model = PLDAG(compilation_setting=CompilationSetting.ON_DEMAND)
+    model.set_primitive("x", 1j)
+    model.set_primitive("y", 2j)
+    c = model.set_and("xy")
+    model.compile()
+    assert model.propagate({"y": 0j, "x": 1+1j}).get(c) == 0j
+    assert model.propagate({"y": 1+1j, "x": 0j}).get(c) == 0j
+    assert model.propagate({"y": 1+1j, "x": 1+1j}).get(c) == 0j
+    assert model.propagate({"y": 2+2j, "x": 1+1j}).get(c) == 1+1j
