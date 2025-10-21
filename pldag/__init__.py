@@ -1500,34 +1500,14 @@ class PLDAG:
         b = -1 * b
 
         # Fix constant variables
-        for i, vs in groupby(
-            sorted(
-                map(
-                    lambda x: (x[0], int(x[1].real)), 
-                    filter(
-                        lambda x: x[1].real == x[1].imag, 
-                        {
-                            **{
-                                str(self._icol(i)): complex(self._dvec[i].real, self._dvec[i].real) 
-                                for i in np.argwhere(self._dvec.real == self._dvec.imag).T[0]
-                            }, 
-                            **assume
-                        }.items()
-                    )
-                ),
-                key=lambda x: x[1] 
-            ), 
-            key=lambda x: x[1]
-        ):
-            v = list(map(lambda x: x[0], vs))
-            v_idx = list(map(self._col, v))
-            
+        for k, v in assume.items():
             # Force both upper and lower bound to be the same
-            for j in [-1,1]:
-                a = np.zeros(A.shape[1], dtype=np.int64) * j
-                a[v_idx] = 1 * j
-                A = np.vstack([A, a])
-                b = np.append(b, a.sum() * i)
+            a_lower = np.zeros(A.shape[1], dtype=np.int64)
+            a_upper = np.zeros(A.shape[1], dtype=np.int64)
+            a_lower[self._col(k)] = 1
+            a_upper[self._col(k)] = -1
+            A = np.vstack([A, [a_lower, a_upper]])
+            b = np.append(b, [int(v.real), -1 * int(v.imag)])
 
         # Set bounds for integer variables
         int_vars = list(set(np.argwhere(
@@ -1571,6 +1551,23 @@ class PLDAG:
         del A_int, b_int
 
         return A, b
+    
+    def print_polyhedron(self):
+        A, b = self.to_polyhedron()
+        columns = self.columns
+        space = 4
+
+        # Print column headers
+        for col_name in columns:
+            print(f"{col_name[:3]:>{space}} ", end="")
+        print()
+
+        # Print each row
+        for ir, row in enumerate(A):
+            for val in row:
+                print(f"{val:>{space}} ", end="")
+            print(f">= {b[ir]:>{space}}")
+        print()
     
     def _from_indices(self, row_idxs: np.ndarray, col_idxs: np.ndarray) -> 'PLDAG':
         """

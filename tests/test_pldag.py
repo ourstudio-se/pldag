@@ -287,17 +287,15 @@ def test_to_polyhedron():
     model = PLDAG()
     model.set_atleast([], 1)
     A,b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (2, 1)
-    assert b.shape == (2,)
-    assert (A == np.array([[-1], [1]])).all()
-    assert (b == np.array([0, 0])).all()
+    assert A.shape == (0, 1)
+    assert b.shape == (0,)
     
     model = PLDAG()
     model.set_primitives("abc")
     model.set_atleast([], 1)
     A,b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (2, 4)
-    assert b.shape == (2,)
+    assert A.shape == (0, 4)
+    assert b.shape == (0,)
 
     # Test when only primitives but some are integers
     model = PLDAG()
@@ -842,8 +840,8 @@ def test_when_composites_turns_to_primitives():
     model.set_atleast([], 1, alias="B")
     model.set_atleast([], 2, alias="C")
     A, b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (4, 3)
-    assert b.shape == (4,)
+    assert A.shape == (0, 3)
+    assert b.shape == (0,)
 
 def test_when_value_is_string_for_atleast_atmost_equal():
     model = PLDAG()
@@ -914,3 +912,11 @@ def test_set_and_with_integer_primitives():
     assert model.propagate({"y": 1+1j, "x": 0j}).get(c) == 0j
     assert model.propagate({"y": 1+1j, "x": 1+1j}).get(c) == 0j
     assert model.propagate({"y": 2+2j, "x": 1+1j}).get(c) == 1+1j
+
+def test_integer_assumptions_when_theyre_not_their_upper_or_lower_bound():
+    model = PLDAG()
+    model.set_primitives("abcxyz", 2j)
+    root = model.set_equal(["x", "y", "z"], 1)
+    solution = model.solve([{k: -1 for k in model.primitives}], {root: 1+1j, "a": 1+1j}, Solver.DEFAULT)[0]
+    propagated_solution = model.propagate(solution)
+    assert propagated_solution[root] == solution[root] == 1+1j
