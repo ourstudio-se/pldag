@@ -914,3 +914,11 @@ def test_set_and_with_integer_primitives():
     assert model.propagate({"y": 1+1j, "x": 0j}).get(c) == 0j
     assert model.propagate({"y": 1+1j, "x": 1+1j}).get(c) == 0j
     assert model.propagate({"y": 2+2j, "x": 1+1j}).get(c) == 1+1j
+
+def test_integer_assumptions_when_theyre_not_their_upper_or_lower_bound():
+    model = PLDAG()
+    model.set_primitives("abcxyz", 2j)
+    root = model.set_equal(["x", "y", "z"], 1)
+    solution = model.solve([{k: -1 for k in model.primitives}], {root: 1+1j, "a": 1+1j}, Solver.DEFAULT)[0]
+    propagated_solution = model.propagate(solution)
+    assert propagated_solution[root] == solution[root] == 1+1j
