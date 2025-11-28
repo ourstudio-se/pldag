@@ -1,61 +1,59 @@
 # Multiplicity-Aware Lexicographic Scaling (MALS)
 
-**Multiplicity-Aware Lexicographic Scaling (MALS)** is an algorithm that transforms
-relative priority values into **dominating weights**.
-The output weights are guaranteed to respect *lexicographic dominance*: any item at a higher priority level outweighs **all items** at lower levels combined.
+**Multiplicity-Aware Lexicographic Scaling (MALS)** is an algorithm that transforms relative priority values into **dominating weights**. The output weights are guaranteed to respect *lexicographic dominance*: any item at a higher priority level outweighs **all items** at lower levels combined.
 
 ---
 
 ## Problem Statement
 
-- **Input**: a vector of integer priorities  
-  \(P = (p_1, p_2, \dots, p_n)\)  
-  (positive and negative values allowed).
+- **Input**: A vector of integer priorities
+  \(P = (p_1, p_2, \dots, p_n)\)
+  (positive and negative values allowed)
 
-- **Output**: a vector of integer weights  
-  \(W = (w_1, w_2, \dots, w_n)\)  
-  such that higher priority items *dominate* all lower priority items.
+- **Output**: A vector of integer weights
+  \(W = (w_1, w_2, \dots, w_n)\)
+  such that higher-priority items *dominate* all lower-priority items
 
 ---
 
 ## Algorithm (Variant A — All-Lower Dominance)
 
-1. **Normalize levels**  
-   - Compute absolute values \(|p_i|\).  
-   - Sort the distinct values.  
-   - Assign each absolute value a *level index* \(\ell \in \{0,1,2,\dots\}\).  
-   - Each item \(p_i\) is thus assigned a level \(L_i\).
+1. **Normalize levels**
+   - Compute absolute values \(|p_i|\)
+   - Sort the distinct values
+   - Assign each absolute value a *level index* \(\ell \in \{0,1,2,\dots\}\)
+   - Each item \(p_i\) is assigned a level \(L_i\)
 
-2. **Count multiplicities**  
-   - For each level \(\ell\), compute the count
+2. **Count multiplicities**
+   - For each level \(\ell\), compute the count:
      \[
-     c_\ell = \big| \{\, i : L_i = \ell \,\} \big|.
+     c_\ell = \big| \{\, i : L_i = \ell \,\} \big|
      \]
 
-3. **Compute level weights**  
+3. **Compute level weights**
    - Initialize:
      \[
      w_0 = 0, \quad S_0 = c_0 \cdot w_0
      \]
    - For each level \(\ell \geq 1\):
      \[
-     w_\ell = S_{\ell-1} + 1, \qquad S_\ell = S_{\ell-1} + c_\ell \cdot w_\ell.
+     w_\ell = S_{\ell-1} + 1, \qquad S_\ell = S_{\ell-1} + c_\ell \cdot w_\ell
      \]
 
    This guarantees that a single item at level \(\ell\) outweighs **all items from lower levels**.
 
-4. **Assign signed weights**  
+4. **Assign signed weights**
    - For each input \(p_i\):
      \[
      f(p_i) =
      \begin{cases}
      0, & p_i = 0, \\
-     \operatorname{sign}(p_i) \cdot w_{L_i}, & \text{otherwise}.
+     \operatorname{sign}(p_i) \cdot w_{L_i}, & \text{otherwise}
      \end{cases}
      \]
 
-5. **Return**  
-   - The transformed vector \(W = (f(p_1), f(p_2), \dots, f(p_n))\).
+5. **Return**
+   - The transformed vector \(W = (f(p_1), f(p_2), \dots, f(p_n))\)
 
 ---
 
@@ -82,18 +80,18 @@ Steps:
 
 ## Properties
 
-- **Deterministic** and order-independent (depends only on priority magnitudes and their multiplicities).
-- **Lexicographic dominance**: any single item at level \(\ell\) outweighs all lower levels combined.
-- Time complexity: \(O(n \log n)\) (sorting distinct absolute values dominates); space \(O(n)\).
+- **Deterministic** and order-independent (depends only on priority magnitudes and their multiplicities)
+- **Lexicographic dominance**: Any single item at level \(\ell\) outweighs all lower levels combined
+- **Time complexity**: \(O(n \log n)\) (sorting distinct absolute values dominates); **space complexity**: \(O(n)\)
 
 ---
 
 ## Mathematical Definition
 
-Let  
-- \(P = (p_1, \dots, p_n)\) be input priorities,  
-- \(L_i = \operatorname{rank}(|p_i|)\) the level index of \(|p_i|\) in the sorted list of distinct absolute values,  
-- \(c_\ell = |\{\, i : L_i = \ell \,\}|\) the multiplicity at level \(\ell\).
+Let:
+- \(P = (p_1, \dots, p_n)\) be the input priorities
+- \(L_i = \operatorname{rank}(|p_i|)\) be the level index of \(|p_i|\) in the sorted list of distinct absolute values
+- \(c_\ell = |\{\, i : L_i = \ell \,\}|\) be the multiplicity at level \(\ell\)
 
 Define:
 \[
@@ -105,11 +103,11 @@ S_\ell &= S_{\ell-1} + c_\ell\,w_\ell.
 \end{aligned}
 \]
 
-Then the output weight for item \(i\) is
+Then the output weight for item \(i\) is:
 \[
  f(p_i) = \begin{cases}
   0, & p_i = 0, \\
-  \operatorname{sign}(p_i)\, w_{L_i}, & \text{otherwise.}
+  \operatorname{sign}(p_i)\, w_{L_i}, & \text{otherwise}
  \end{cases}
 \]
 
@@ -177,7 +175,6 @@ if __name__ == "__main__":
 
 ## Notes & Variants
 
-- If you instead want each level to dominate **only the immediately lower level** (not all lower levels combined), set
-  \(w_\ell = c_{\ell-1} \cdot w_{\ell-1} + 1\) with suitable bases; this reproduces the sequence in the worked example and can be documented as a variant ("Adjacent-Level Dominance").
-- You can adopt exponential bases (e.g., powers of a base \(B\)) to reach the same lexicographic effect without counting multiplicities; MALS is *multiplicity-aware*, producing minimal integer weights.
+- If you want each level to dominate **only the immediately lower level** (not all lower levels combined), set \(w_\ell = c_{\ell-1} \cdot w_{\ell-1} + 1\) with suitable bases. This reproduces the sequence in the worked example and can be documented as a variant ("Adjacent-Level Dominance").
+- You can adopt exponential bases (e.g., powers of a base \(B\)) to achieve the same lexicographic effect without counting multiplicities. MALS is *multiplicity-aware*, producing minimal integer weights.
 
