@@ -518,6 +518,23 @@ class PLDAG:
         self._buffer = []
         
         return all_ids
+    
+    def parents(self, id: str) -> list:
+        """
+            Get the parents of a variable.
+            Parameters
+            ----------
+            id : str
+                The ID of the variable.
+
+            Returns
+            -------
+            list
+                A list of parent variable IDs.
+        """
+        col_idx = self._imap[id]
+        parent_idxs = np.argwhere(self._amat[:, col_idx] != 0).T[0]
+        return list(map(str, map(self._irow, parent_idxs)))
 
     def set_gelineq(self, coefficients: Dict[str, int], bias: int, alias: Optional[str] = None, silent: bool = False, ttype: str = "lineq", unique: bool = False) -> str:
         """
@@ -560,26 +577,12 @@ class PLDAG:
                 if not (k in self._imap or k in map(lambda x: x[0], self._buffer)):
                     self.set_primitive(k, complex(0, 1))
 
-        # If the composite is either a contradiction or tautology, we create a primitive instead
-        # and fix it to 0 or 1 respectively.
-        dvals_comp = np.array(list(map(lambda x: self.get(x), coefficients.keys())) + [1+1j])
-        coefs_comp = np.array([list(coefficients.values()) + [bias]])
-        result = self._sdot(coefs_comp, dvals_comp)[0]
         _id = self._composite_id(
             coefficients,
             bias,
             unique=unique
         )
-        # If the result is always true, we create a primitive fixed to 1
-        if result.real >= 0:
-            self._buffer.append((_id, {}, 0, 1+1j, alias, silent, "primitive"))
-        
-        # If the result is always false, we create a primitive fixed to 0
-        elif result.imag < 0:
-            self._buffer.append((_id, {}, 0, 0j, alias, silent, "primitive"))
-        else:
-            self._buffer.append((_id, coefficients, bias, 1j, alias, silent, ttype))
-        
+        self._buffer.append((_id, coefficients, bias, 1j, alias, silent, ttype))
         if self._compilation_setting == CompilationSetting.INSTANT:
             self.compile()
     
@@ -909,6 +912,141 @@ class PLDAG:
             Propagates the graph downstream and upstream, and returns the propagated bounds.
         """
         return self._propagate("bistream", query, freeze)
+    
+    def _assume_algo(bounds: Dict[str, complex], geqs: Dict[str, Tuple[Dict[str, int], int]], max_iters: int = 100) -> Dict[str, complex]:
+        def bound_mul(bound: complex, val: int) -> complex:
+            if val >= 0:
+                return complex(bound.real * val, bound.imag * val)
+            else:
+                return complex(bound.imag * val, bound.real * val)
+            
+        def inner_bound(bounds: List[complex], coefs: List[int], bias: int) -> complex:
+            result = complex(0, 0)
+            for b, c in zip(bounds, coefs):
+                result += bound_mul(b, c)
+            return result + complex(bias, bias)
+
+        def eval_geq(bounds: List[complex], coefs: List[int], bias: int) -> complex:
+            ib = inner_bound(bounds, coefs, bias)
+            return complex((ib.real >= 0)*1, (ib.imag >= 0)*1)
+
+        def top_to_bottom(bounds: Dict[str, complex], geqs: Dict[str, Tuple[Dict[str, int], int]]):
+            result = bounds.copy()
+            # Find all nodes which has no nodes depending on them
+            S = list(filter(lambda k: all(k not in v[0] for v in geqs.values()), bounds.keys()))
+            while len(S) > 0:
+                s = S.pop(0)
+                geq, bias = geqs.get(s, (None, 0))
+                if geq is not None:
+                    geqs_inner_bound = inner_bound(
+                        [result[k] for k in geq.keys()],
+                        [v for v in geq.values()],
+                        bias
+                    )
+                    # 1. Inner upper bound is 0 and geq is true, then fix the geq variable's lower bound to their upper bound (or flipped if coef is negative)
+                    if (geqs_inner_bound.imag == 0) and (result[s] == 1+1j):
+                        x=1
+                        for k, v in geq.items():
+                            k_bound = result[k]
+                            result[k] = complex(k_bound.imag, k_bound.imag) if v > 0 else complex(k_bound.real, k_bound.real)
+                    
+                    # 2. Inner lower bound is -1 and geq is false, then fix the geq variable's upper bound to their lower bound (or flipped if coef is negative)
+                    elif (geqs_inner_bound.real == -1) and (result[s] == 0j):
+                        x=1
+                        for k, v in geq.items():
+                            k_bound = result[k]
+                            result[k] = complex(k_bound.real, k_bound.real) if v > 0 else complex(k_bound.imag, k_bound.imag)
+
+                    # 3. If the outer bound is fixed and the geq is set, check that they have the same value. Else we've reached a contradiction. 
+                    geq_eval = complex(geqs_inner_bound.real >= 0, geqs_inner_bound.imag >= 0)
+                    if (geq_eval.real == geq_eval.imag) and (result[s].real == result[s]) and (result[s].real != geq_eval.real):
+                        raise ValueError(f"Contradiction detected when evaluating {s}: expected {result[s]}, got {geq_eval}")
+                    
+                    # 4. If there's only one non-fixed variable and geq is true, then tighten the non-fixed variable such that inner upper bound is 0. 
+                    exactly_one_non_fixed = sum(map(lambda k: result[k].real != result[k].imag, geq)) == 1
+                    geq_eval = complex(geqs_inner_bound.real >= 0, geqs_inner_bound.imag >= 0)
+                    if geq_eval != result[s]:
+                        if exactly_one_non_fixed and result[s] == 1+1j:
+                            non_fixed_key = next(k for k in geq.keys() if result[k].real != result[k].imag)
+                            non_fixed_coef = geq[non_fixed_key]
+                            k = abs(geqs_inner_bound.imag / non_fixed_coef)
+                            if non_fixed_coef > 0:
+                                result[non_fixed_key] = complex(result[non_fixed_key].real, result[non_fixed_key].imag-k)
+                            else:
+                                result[non_fixed_key] = complex(result[non_fixed_key].real+k, result[non_fixed_key].imag)
+
+                        # 5. If there's only one non-fixed variable and geq is false, then tighten the non-fixed variable such that inner lower bound is -1.
+                        elif exactly_one_non_fixed and result[s] == 0j:
+                            non_fixed_key = next(k for k in geq.keys() if result[k].real != result[k].imag)
+                            non_fixed_coef = geq[non_fixed_key]
+                            k = abs(geqs_inner_bound.real / non_fixed_coef)
+                            if non_fixed_coef > 0:
+                                result[non_fixed_key] = complex(result[non_fixed_key].real+k, result[non_fixed_key].imag)
+                            else:
+                                result[non_fixed_key] = complex(result[non_fixed_key].real, result[non_fixed_key].imag-k)
+
+                    S += [k for k in geq.keys() if not k in S and k in geqs]
+            return result
+
+        def bottom_to_top(bounds: Dict[str, complex], geqs: Dict[str, Tuple[Dict[str, int], int]]):
+            result = bounds.copy()
+            S = list(filter(lambda k: k not in geqs, bounds.keys()))
+            while len(S) > 0:
+                s = S.pop(0)
+                geq, bias = geqs.get(s, (None, 0))
+                if geq is not None:
+                    result[s] = eval_geq(
+                        [result[k] for k in geq.keys()],
+                        [v for v in geq.values()],
+                        bias
+                    )
+                S += [k for k, v in geqs.items() if s in v[0] and k not in S and (bounds[k].real != bounds[k].imag)]
+            return result
+        
+        count = 0
+        bounds_copy = bounds.copy()
+        bounds_copy_2 = None
+        while bounds_copy != bounds_copy_2 and count < max_iters:
+            bounds_copy_2 = bounds_copy
+            bounds_copy = top_to_bottom(bottom_to_top(bounds_copy, geqs), geqs)
+            count += 1
+        return bounds_copy
+    
+    def assume(self, assumptions: Dict[str, complex], max_iters: int = 100) -> Dict[str, complex]:
+        """
+            Assumes the given bounds and tries to infer new bounds.
+
+            Parameters
+            ----------
+            assumptions : Dict[str, complex]
+                The assumptions to set.
+
+            max_iters : int (default=100)
+                The maximum number of iterations to perform.
+
+            Examples
+            --------
+            >>> model = PLDAG()
+            >>> model.set_primitives("xy")
+            >>> a = model.set_atleast("xy", 1)
+            >>> model.assume({"x": 1+1j})
+            {'x': 1+1j, 'y': 0j, 'da4ab8efc9b188b591115c3f376d0bc1ac6481ca': 1+1j}
+
+            Returns
+            -------
+            Dict[str, complex]
+                The inferred bounds.
+        """
+        geqs = {}
+        for i in range(self._amat.shape[0]):
+            coefs = {}
+            row = self._amat[i]
+            for j in np.argwhere(row != 0).T[0]:
+                coefs[str(self._icol(j))] = int(row[j])
+            geqs[str(self._irow(i))] = (coefs, int(self._bvec[i].real))
+
+        bounds = {**{str(k): self.get(k) for k in self.columns}, **assumptions}
+        return PLDAG._assume_algo(bounds, geqs, max_iters)
     
     def set_primitive(self, id: str, bound: complex = complex(0,1)) -> str:
         """
@@ -1468,7 +1606,7 @@ class PLDAG:
         Pi_Phi_i = np.arange(self._amat.shape[0])
 
         # Find coefficient to Pi (d), preparing for Pi -> Phi
-        Pi_Phi_d = np.abs(np.array([ib.real, ib.imag], dtype=np.int64)).max(axis=0)
+        Pi_Phi_d = np.abs(np.array([ib.real, ib.imag], dtype=np.int64)).max(axis=0) + np.abs(b)
 
         # Step 1. Set Pi in A to be the coefficient to Pi, -dπ + ... + b >= 0
         A[Pi_Phi_i, self._cvec] = -1 * Pi_Phi_d

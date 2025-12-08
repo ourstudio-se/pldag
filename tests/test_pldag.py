@@ -127,7 +127,7 @@ def test_get():
     model = PLDAG()
     model.set_primitives("xyz")
     a=model.set_atleast("xyz", -1)
-    for id, expected in zip(["x", "y", "z", a], np.array([1j, 1j, 1j, 1+1j])):
+    for id, expected in zip(["x", "y", "z", a], np.array([1j, 1j, 1j, 1j])):
         assert np.array_equal(model.get(id), expected)
 
 def test_propagate_query():
@@ -283,19 +283,18 @@ def test_to_polyhedron():
     # Which is ok.
     assert (A.dot([-5, 0, -4, -4, 0, 0, 0, 1]) >= b).all()
 
-    # Test if there's a 0-reference proposition, to_polyhedron should return an empty polyhedron
     model = PLDAG()
     model.set_atleast([], 1)
     A,b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (0, 1)
-    assert b.shape == (0,)
+    assert A.shape == (2, 1)
+    assert b.shape == (2,)
     
     model = PLDAG()
     model.set_primitives("abc")
     model.set_atleast([], 1)
     A,b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (0, 4)
-    assert b.shape == (0,)
+    assert A.shape == (2, 4)
+    assert b.shape == (2,)
 
     # Test when only primitives but some are integers
     model = PLDAG()
@@ -834,15 +833,6 @@ def test_auto_create_primitives():
     root = model.set_xor("xyz")
     assert model.propagate({"x": 1+1j, "y": 0j, "z": 0j}).get(root) == 1+1j
 
-def test_when_composites_turns_to_primitives():
-    model = PLDAG()
-    model.set_atleast([], 0, alias="A")
-    model.set_atleast([], 1, alias="B")
-    model.set_atleast([], 2, alias="C")
-    A, b = model.to_polyhedron(double_binding=True)
-    assert A.shape == (0, 3)
-    assert b.shape == (0,)
-
 def test_when_value_is_string_for_atleast_atmost_equal():
     model = PLDAG()
     model.set_primitives("xy")
@@ -920,3 +910,33 @@ def test_integer_assumptions_when_theyre_not_their_upper_or_lower_bound():
     solution = model.solve([{k: -1 for k in model.primitives}], {root: 1+1j, "a": 1+1j}, Solver.DEFAULT)[0]
     propagated_solution = model.propagate(solution)
     assert propagated_solution[root] == solution[root] == 1+1j
+
+def test_assume_func():
+    model = PLDAG()
+    model.set_primitives("xyz")
+    root = model.set_or("xyz")
+    res = model.assume({"x": 1+1j})
+    assert res.get(root) == 1+1j
+    
+    model = PLDAG()
+    model.set_primitives("xyz")
+    root = model.set_xor("xyz")
+    res = model.assume({"x": 1+1j})
+    assert res.get(root) == 1j
+    res = model.assume({root: 1+1j, "x": 1+1j})
+    assert res.get("y") == 0j
+    assert res.get("z") == 0j
+
+def test_empty_atleast_atmost():
+    model = PLDAG()
+    model.set_atleast([], 0, alias="A")
+    model.set_atleast([], 1, alias="B")
+    model.set_atmost([], 3, alias="C")
+    model.set_atmost([], -2, alias="D")
+
+    A, B = model.to_polyhedron(double_binding=True)
+    assert A.shape == (8, 4)
+    assert (A.dot([1,0,1,0]) >= B).all()
+    assert (A.dot([1,0,1,0]) >= B).all()
+    assert not (A.dot([1,1,1,0]) >= B).all()
+    assert not (A.dot([1,0,1,1]) >= B).all()

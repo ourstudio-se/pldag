@@ -34,9 +34,9 @@ To find the negation of an inequality constraint, follow these two steps:
 
 The transformation is done by following these steps:
 
-1. Let $d = \text{max}(|\text{ib}(\phi)|)$
+1. Let $d = \text{max}(|\text{ib}(\phi)|)+|\text{bias}(\pi)|$
 2. Append $-d\pi$ to the left side of the equation $\phi$
-3. Append $-d$ to the right side of the equation $\phi$ (or sum with the bias)
+3. Append $-d$ to the right side of the equation $\phi$
 
 ### Example
 
@@ -44,12 +44,12 @@ Transform $\pi \rightarrow (x + y + z - 2 \geq 0)$, where $x, y, z \in [0,1]^3$:
 
 1. Calculate $d = \text{max}(|\text{ib}(\phi)|)$:
    1. $d = \text{max}(|\text{ib}(x + y + z - 2 \geq 0)|)$
-   2. $d = \text{max}(|[0,2]|)$
-   3. $d = \text{max}([0,2])$
-   4. $d = 2$
-2. Use $-d$ as the coefficient for $\pi$ and append to the left side of $\phi$: $-2\pi + x + y + z - 2 \geq 0$
-3. Append $-d$ to the right side of $\phi$: $-2\pi + x + y + z - 2 \geq -2$
-4. Sum all constants: $-2\pi + x + y + z \geq 0$
+   2. $d = \text{max}(|[0,3]|)$
+   3. $d = \text{max}([0,3])$
+   4. $d = 3$
+2. Use $-d$ as the coefficient for $\pi$ and append to the left side of $\phi$: $-3\pi + x + y + z - 2 \geq 0$
+3. Append $-d$ to the right side of $\phi$: $-3\pi + x + y + z - 2 \geq -3$
+4. Sum all constants: $-3\pi + x + y + z \geq -1$
 
 ## Transforming $\phi \rightarrow \pi$
 
